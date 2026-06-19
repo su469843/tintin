@@ -3,7 +3,7 @@
  * App.vue - 听写应用根组件（编排器）
  * 负责整体布局、主题、手势控制、词库初始化
  */
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useDictationStore } from './stores/dictationStore'
 import { useStorage } from './composables/useStorage'
 import DictationPlayer from './components/DictationPlayer.vue'
@@ -11,7 +11,10 @@ import WordBankManager from './components/WordBankManager.vue'
 import ProgressDashboard from './components/ProgressDashboard.vue'
 
 const store = useDictationStore()
-const { STORAGE_KEYS, persistRef } = useStorage()
+const { STORAGE_KEYS, load, save } = useStorage()
+
+/** 取消订阅 Pinia store 变化（onUnmounted 时清理） */
+let unsubscribeStore = null
 
 // ============================================================
 // 📱 标签页导航
@@ -67,9 +70,17 @@ onMounted(async () => {
   updateDarkMode()
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateDarkMode)
 
-  // 持久化状态
-  persistRef(store.wrongWords, STORAGE_KEYS.WRONG_WORDS, [])
-  persistRef(store.dailyStats, STORAGE_KEYS.DAILY_STATS, {})
+  // 从 localStorage 恢复持久化状态
+  const savedWrongWords = load(STORAGE_KEYS.WRONG_WORDS, [])
+  const savedDailyStats = load(STORAGE_KEYS.DAILY_STATS, {})
+  savedWrongWords.forEach(item => store.wrongWords.push(item))
+  Object.assign(store.dailyStats, savedDailyStats)
+
+  // 监听状态变化，自动保存到 localStorage
+  unsubscribeStore = store.$subscribe((mutation, state) => {
+    save(STORAGE_KEYS.WRONG_WORDS, state.wrongWords)
+    save(STORAGE_KEYS.DAILY_STATS, state.dailyStats)
+  })
 
   // 从 /words.json 加载词库
   try {
@@ -88,6 +99,13 @@ onMounted(async () => {
     }
   } catch (err) {
     console.error('词库加载失败:', err)
+  }
+})
+
+onUnmounted(() => {
+  if (unsubscribeStore) {
+    unsubscribeStore()
+    unsubscribeStore = null
   }
 })
 </script>

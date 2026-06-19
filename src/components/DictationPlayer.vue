@@ -3,7 +3,6 @@
  * DictationPlayer.vue - 核心听写区
  * 显示当前单词、播放控制、输入对比
  */
-import { ref } from 'vue'
 import { useDictationStore } from '../stores/dictationStore'
 import { EdgeTTS } from 'edge-tts-universal/browser'
 

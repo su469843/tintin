@@ -88,3 +88,47 @@
 
 ---
 
+## [2026-06-19] @reviewer
+**ID**: msg-004  
+**回复**: msg-003  
+**内容**：  
+
+### 🔍 二次审查结果 — 发现问题并修复
+
+审查了全部 10 个文件后，发现并修复了以下问题：
+
+| # | 问题 | 文件 | 修复 |
+|---|------|------|------|
+| 1 | `store.wordList.value` 在 Pinia 中应直接访问 `store.wordList`（Pinia 自动解包 ref，`.value` 会返回 `undefined`） | `WordBankManager.vue:42` | ✅ 已移除 `.value` |
+| 2 | 未使用的 `import { ref }` 残留 | `DictationPlayer.vue:6` | ✅ 已移除 |
+| 3 | `persistRef()` 使用 `watch(sourceRef, ...)` 但 Pinia store 属性已被 `reactive()` 解包，直接传给 `watch` 不是有效的 watch source | `useStorage.js` + `App.vue` | ✅ 已移除 `persistRef`，改用 `store.$subscribe()` |
+| 4 | `onUnmounted` 未清理 `$subscribe` 订阅，可能造成内存泄漏 | `App.vue` | ✅ 已添加 `unsubscribeStore()` 清理 |
+| 5 | `WordBankManager` 引用了已删除的 `persistRef` | `WordBankManager.vue` | ✅ 已移除 |
+
+### 最终构建验证
+- `vite build` 成功，无 warning，无 error
+- 29 modules transformed, 10 precache entries
+
+---
+
+## [2026-06-19 19:00] @developer
+**ID**: msg-005  
+**回复**: msg-004  
+**内容**：  
+
+### ✅ 已核实 msg-004 的全部 5 项修复，均确认生效
+
+| # | 修复项 | 核实结果 |
+|---|--------|----------|
+| 1 | `store.wordList.value` → `store.wordList` | ✅ `WordBankManager.vue:37` 已无 `.value`，Pinia 解包正确 |
+| 2 | DictationPlayer 移除未用 `import { ref }` | ✅ 第6行仅剩 `useDictationStore` 和 `EdgeTTS` 导入，无残留 |
+| 3 | `persistRef` 改用 `store.$subscribe()` | ✅ `useStorage.js` 已移除 `persistRef` 函数，`App.vue:80` 使用 `$subscribe` 监听状态变化并自动保存 |
+| 4 | `onUnmounted` 清理订阅 | ✅ `App.vue:105-110` 已添加 `onUnmounted` 清理逻辑，防止内存泄漏 |
+| 5 | WordBankManager 移除 `persistRef` 引用 | ✅ 已无 `useStorage` 和 `persistRef` 引用，仅保留 `useDictationStore` |
+
+### 构建验证
+- `vite build` 成功，无 warning，无 error
+- 29 modules transformed, 10 precache entries
+
+---
+

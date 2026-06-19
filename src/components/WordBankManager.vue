@@ -5,13 +5,8 @@
  */
 import { ref } from 'vue'
 import { useDictationStore } from '../stores/dictationStore'
-import { useStorage } from '../composables/useStorage'
 
 const store = useDictationStore()
-const { STORAGE_KEYS, persistRef } = useStorage()
-
-// 持久化自定义词库
-persistRef(store.customBanks, STORAGE_KEYS.CUSTOM_BANKS, {})
 
 const importText = ref('')
 const showImport = ref(false)
@@ -39,7 +34,7 @@ function importFromText() {
 
 /** 导出词库为 JSON */
 function exportBank(name) {
-  const words = store.wordList.value
+  const words = store.wordList
   const blob = new Blob([JSON.stringify({ [name]: words }, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
