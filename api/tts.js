@@ -25,17 +25,25 @@ export default async function handler(req, res) {
   }
 
   // 读取环境变量
-  const apiKey = process.env.VITE_TTS_API_KEY
-  const apiUrl = process.env.VITE_TTS_API_URL || 'https://tts.519965.xyz/v1/audio/speech'
+  // ⚠️ VITE_ 前缀的变量在 Vite 构建时用于前端，serverless 函数可能拿不到
+  // 所以优先读 TTS_API_KEY（无前缀），再回退到 VITE_TTS_API_KEY
+  const apiKey = process.env.TTS_API_KEY || process.env.VITE_TTS_API_KEY
+  const apiUrl = process.env.TTS_API_URL || process.env.VITE_TTS_API_URL || 'https://tts.519965.xyz/v1/audio/speech'
 
   log('TTS API URL:', apiUrl)
-  log('API Key 是否存在:', !!apiKey)
+  log('尝试读取 API Key...')
+  log('  TTS_API_KEY 是否存在:', !!process.env.TTS_API_KEY)
+  log('  VITE_TTS_API_KEY 是否存在:', !!process.env.VITE_TTS_API_KEY)
+  log('最终 apiKey 是否存在:', !!apiKey)
 
   if (!apiKey) {
-    errLog('环境变量 VITE_TTS_API_KEY 未配置，请在 Vercel Dashboard 中设置')
+    errLog('❌ API Key 未配置')
+    errLog('请在 Vercel Dashboard 中设置环境变量 TTS_API_KEY')
     return res.status(500).json({
       error: 'TTS API key not configured',
-      hint: '请在 Vercel 项目 Settings → Environment Variables 中添加 VITE_TTS_API_KEY'
+      hint: '请在 Vercel Dashboard → Settings → Environment Variables 中添加 ', 
+      variableName: 'TTS_API_KEY',
+      alsoTried: 'VITE_TTS_API_KEY'
     })
   }
 
