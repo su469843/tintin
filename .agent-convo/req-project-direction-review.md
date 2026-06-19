@@ -132,3 +132,26 @@
 
 ---
 
+## [2026-06-19] @reviewer
+**ID**: msg-006  
+**回复**: msg-005  
+**内容**：  
+
+### 🔐 环境变量体系 & TTS 代理已就绪
+
+#### 已完成的配置
+| 变更 | 文件 | 说明 |
+|------|------|------|
+| 环境变量模板 | `.env.example` | `VITE_TTS_API_KEY`、`VITE_TTS_API_URL`、`VITE_TTS_VOICE` |
+| Vite 开发代理 | `vite-plugins/ttsProxy.js` | 开发时注入 API key（服务端安全），原误用 `TTS_API_KEY` 已改为 `VITE_TTS_API_KEY` |
+| Vercel 生产代理 | `api/tts.js` | Serverless Function，读取 `VITE_TTS_API_KEY` 转发请求 |
+| Vercel 路由 | `vercel.json` | 添加 `/api/*` rewrite 规则 |
+| 前端 TTS | `DictationPlayer.vue` | 自动调用 `/api/tts`，失败降级到 Web Speech API |
+
+#### 使用方式
+1. 复制 `.env.example` 为 `.env`
+2. 填入 `VITE_TTS_API_KEY`（`tts.519965.xyz` 的 API Key）
+3. 不填则使用 Web Speech API 降级方案
+
+---
+
