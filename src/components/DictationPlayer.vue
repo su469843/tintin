@@ -41,45 +41,88 @@ function detectVoice(text) {
 /**
  * 通过后端代理调用 TTS API（带 10 秒超时保护）
  * 后端转发到 tts.519965.xyz，避免 CORS 问题
+ *
+ * 日志说明：所有 console.group/console.log 可在浏览器 DevTools 中查看
  */
 async function speakWithAPI(text) {
   const TIMEOUT_MS = 10000
+  const reqId = Date.now().toString(36)
 
   const fetchPromise = (async () => {
     const voice = detectVoice(text)
 
-    const resp = await fetch('/api/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'tts-1',
-        input: text,
-        voice: voice,
-        speed: 0.9, // 稍慢，便于听清
-      }),
-    })
+    console.group(`[TTS:${reqId}] 请求 TTS API`)
+    console.log('朗读文本:', text)
+    console.log('语音角色:', voice)
+    console.log('请求地址:', '/api/tts')
+
+    let resp
+    try {
+      resp = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'tts-1',
+          input: text,
+          voice: voice,
+          speed: 0.9,
+        }),
+      })
+      console.log('响应状态:', resp.status, resp.statusText)
+      console.log('响应耗时:', resp.headers.get('X-TTS-Elapsed') || '未知')
+    } catch (err) {
+      console.error('网络请求失败:', err.message)
+      console.groupEnd()
+      throw new Error(`网络错误: ${err.message}`)
+    }
 
     if (!resp.ok) {
-      const errData = await resp.json().catch(() => ({}))
-      throw new Error(errData.error || `TTS API 返回 ${resp.status}`)
+      let errData = {}
+      try {
+        errData = await resp.json()
+        console.error('API 错误详情:', errData)
+      } catch {
+        const errText = await resp.text().catch(() => '')
+        console.error('API 错误(非JSON):', errText.substring(0, 200))
+      }
+      console.groupEnd()
+      throw new Error(errData.error || errData.upstream_body || `TTS API 返回 ${resp.status}`)
     }
 
     // API 返回 audio/mpeg，转为 Blob 播放
+    console.log('正在读取音频流...')
     const blob = await resp.blob()
+    console.log('音频大小:', blob.size, 'bytes')
+    console.log('音频类型:', blob.type)
+
+    if (blob.size === 0) {
+      console.error('收到空音频')
+      console.groupEnd()
+      throw new Error('TTS 返回空音频')
+    }
+
     const url = URL.createObjectURL(blob)
     const audioEl = new Audio(url)
 
+    console.log('开始播放音频...')
     await new Promise((resolve, reject) => {
-      audioEl.onended = resolve
+      audioEl.onended = () => {
+        console.log('播放完成')
+        resolve()
+      }
       audioEl.onerror = () => reject(new Error('Audio playback error'))
       audioEl.play().catch(reject)
     })
 
     URL.revokeObjectURL(url)
+    console.groupEnd()
   })()
 
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('TTS API 超时')), TIMEOUT_MS)
+    setTimeout(() => {
+      console.error(`[TTS:${reqId}] ❌ 请求超时 (${TIMEOUT_MS}ms)`)
+      reject(new Error('TTS API 超时'))
+    }, TIMEOUT_MS)
   )
 
   await Promise.race([fetchPromise, timeoutPromise])
