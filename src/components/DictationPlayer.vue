@@ -3,17 +3,19 @@
  * DictationPlayer.vue - 核心听写区
  * 显示当前单词、播放控制、输入对比
  *
- * 语音策略：
- *   1. 优先使用后端 TTS 代理（/api/tts → tts.519965.xyz），高质量神经网络语音
- *   2. 失败时自动降级为浏览器内置 Web Speech API
+ * 语音策略（三引擎降级）：
+ *   1. 后端 TTS 代理（/api/tts → tts.519965.xyz），需配置 TTS_API_KEY
+ *   2. edge-tts-universal（浏览器 WebSocket 连微软 Edge TTS）
+ *   3. 浏览器内置 Web Speech API（最终降级）
  */
 import { ref } from 'vue'
 import { useDictationStore } from '../stores/dictationStore'
+import { EdgeTTS } from 'edge-tts-universal/browser'
 
 // ============================================================
 // 🎙️ 语音配置
 // ============================================================
-// TTS API 语音角色（通过后端代理调用 tts.519965.xyz）
+// TTS API 语音角色
 const TTS_VOICE = 'en-US-JennyNeural'
 // 如需中文语音，改为：
 // const TTS_VOICE = 'zh-CN-XiaoxiaoNeural'
@@ -26,7 +28,7 @@ const SPEECH_LANG = 'en-US'
 const store = useDictationStore()
 
 /** 标记当前使用的语音引擎 */
-const ttsEngine = ref('api') // 'api' | 'web'
+const ttsEngine = ref('api') // 'api' | 'edge' | 'web'
 
 /**
  * 根据文本自动检测语言，返回对应语音角色
@@ -38,12 +40,9 @@ function detectVoice(text) {
   return TTS_VOICE // 默认英文
 }
 
-/**
- * 通过后端代理调用 TTS API（带 10 秒超时保护）
- * 后端转发到 tts.519965.xyz，避免 CORS 问题
- *
- * 日志说明：所有 console.group/console.log 可在浏览器 DevTools 中查看
- */
+// ============================================================
+// 🅰️ 引擎 1：后端 TTS 代理（带 10 秒超时）
+// ============================================================
 async function speakWithAPI(text) {
   const TIMEOUT_MS = 10000
   const reqId = Date.now().toString(36)
@@ -51,10 +50,9 @@ async function speakWithAPI(text) {
   const fetchPromise = (async () => {
     const voice = detectVoice(text)
 
-    console.group(`[TTS:${reqId}] 请求 TTS API`)
+    console.group(`[TTS:${reqId}] 🅰️ 尝试 TTS API`)
     console.log('朗读文本:', text)
     console.log('语音角色:', voice)
-    console.log('请求地址:', '/api/tts')
 
     let resp
     try {
@@ -69,7 +67,6 @@ async function speakWithAPI(text) {
         }),
       })
       console.log('响应状态:', resp.status, resp.statusText)
-      console.log('响应耗时:', resp.headers.get('X-TTS-Elapsed') || '未知')
     } catch (err) {
       console.error('网络请求失败:', err.message)
       console.groupEnd()
@@ -83,17 +80,15 @@ async function speakWithAPI(text) {
         console.error('API 错误详情:', errData)
       } catch {
         const errText = await resp.text().catch(() => '')
-        console.error('API 错误(非JSON):', errText.substring(0, 200))
+        console.error('API 错误(非JSON, 前200字符):', errText.substring(0, 200))
       }
       console.groupEnd()
       throw new Error(errData.error || errData.upstream_body || `TTS API 返回 ${resp.status}`)
     }
 
-    // API 返回 audio/mpeg，转为 Blob 播放
     console.log('正在读取音频流...')
     const blob = await resp.blob()
     console.log('音频大小:', blob.size, 'bytes')
-    console.log('音频类型:', blob.type)
 
     if (blob.size === 0) {
       console.error('收到空音频')
@@ -115,6 +110,7 @@ async function speakWithAPI(text) {
     })
 
     URL.revokeObjectURL(url)
+    console.log('✅ TTS API 朗读成功')
     console.groupEnd()
   })()
 
@@ -128,52 +124,126 @@ async function speakWithAPI(text) {
   await Promise.race([fetchPromise, timeoutPromise])
 }
 
-/**
- * 使用浏览器内置 Web Speech API 朗读（回退方案）
- */
+// ============================================================
+// 🅱️ 引擎 2：edge-tts-universal（浏览器端，微软 Edge TTS WebSocket）
+//    注意：该库在 WebSocket 失败时可能不 reject，故加 5 秒超时
+// ============================================================
+async function speakWithEdgeTTS(text) {
+  const TIMEOUT_MS = 5000
+  const reqId = Date.now().toString(36)
+
+  const ttsPromise = (async () => {
+    console.group(`[TTS:${reqId}] 🅱️ 尝试 edge-tts-universal`)
+    console.log('朗读文本:', text)
+
+    const tts = new EdgeTTS(text, TTS_VOICE)
+    console.log('正在合成语音...')
+    const { audio } = await tts.synthesize()
+    console.log('合成成功，音频大小:', audio.size, 'bytes')
+
+    if (audio.size === 0) {
+      console.error('合成结果为空')
+      console.groupEnd()
+      throw new Error('EdgeTTS 返回空音频')
+    }
+
+    const url = URL.createObjectURL(audio)
+    const audioEl = new Audio(url)
+
+    console.log('开始播放...')
+    await new Promise((resolve, reject) => {
+      audioEl.onended = () => {
+        console.log('播放完成')
+        resolve()
+      }
+      audioEl.onerror = () => reject(new Error('Audio playback error'))
+      audioEl.play().catch(reject)
+    })
+
+    URL.revokeObjectURL(url)
+    console.log('✅ edge-tts 朗读成功')
+    console.groupEnd()
+  })()
+
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => {
+      console.error(`[TTS:${reqId}] ❌ edge-tts 超时 (${TIMEOUT_MS}ms)`)
+      reject(new Error('edge-tts 超时'))
+    }, TIMEOUT_MS)
+  )
+
+  await Promise.race([ttsPromise, timeoutPromise])
+}
+
+// ============================================================
+// 🅲 引擎 3：浏览器内置 Web Speech API（最终降级）
+// ============================================================
 function speakWithWebSpeech(text) {
   return new Promise((resolve, reject) => {
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.lang = SPEECH_LANG
-    utterance.rate = 0.9  // 稍慢，便于听清
+    utterance.rate = 0.9
     utterance.onend = resolve
     utterance.onerror = (e) => reject(new Error(`Web Speech error: ${e.error}`))
     speechSynthesis.speak(utterance)
   })
 }
 
-/** 朗读当前单词（TTS API 优先，失败自动降级 Web Speech API） */
+// ============================================================
+// 🎯 统一入口：三引擎逐级降级
+// ============================================================
+/** 朗读当前单词（API → edge-tts → Web Speech，逐级降级） */
 async function speakCurrent() {
   if (store.isPlaying || store.isFinished) return
   store.setPlaying(true)
 
   const word = store.currentWord
+  const reqId = Date.now().toString(36)
 
-  // 优先尝试后端 TTS API
+  console.group(`[TTS:${reqId}] 🎯 开始朗读: "${word}"`)
+  console.log('当前引擎:', ttsEngine.value)
+
+  // --- 引擎 1：TTS API ---
   if (ttsEngine.value === 'api') {
     store.setStatus('正在朗读...')
     try {
       await speakWithAPI(word)
       store.setStatus('')
       store.setPlaying(false)
+      console.groupEnd()
       return
     } catch (err) {
-      console.warn('TTS API 失败，降级为 Web Speech API:', err.message)
-      // 标记降级，后续直接走 Web Speech 避免重复失败
+      console.warn('⚠️ TTS API 失败，降级到 edge-tts:', err.message)
+      ttsEngine.value = 'edge'
+    }
+  }
+
+  // --- 引擎 2：edge-tts-universal ---
+  if (ttsEngine.value === 'edge') {
+    store.setStatus('正在朗读（Edge TTS）...')
+    try {
+      await speakWithEdgeTTS(word)
+      store.setStatus('')
+      store.setPlaying(false)
+      console.groupEnd()
+      return
+    } catch (err) {
+      console.warn('⚠️ edge-tts 失败，降级到 Web Speech:', err.message)
       ttsEngine.value = 'web'
     }
   }
 
-  // 使用 Web Speech API（回退）
+  // --- 引擎 3：Web Speech API（最终降级）---
   store.setStatus('正在朗读（内置语音）...')
   try {
     await speakWithWebSpeech(word)
     store.setStatus('')
   } catch (err) {
-    console.error('朗读出错:', err)
+    console.error('❌ 所有语音引擎均失败:', err)
     store.setStatus('朗读出错，请重试')
   } finally {
     store.setPlaying(false)
+    console.groupEnd()
   }
 }
 
