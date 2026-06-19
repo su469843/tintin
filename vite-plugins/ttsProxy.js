@@ -9,7 +9,7 @@ import http from 'node:http'
 
 /** TTS API 配置 */
 const TTS_API_URL = 'https://tts.519965.xyz/v1/audio/speech'
-const TTS_API_KEY = process.env.TTS_API_KEY || 'abc22211rf' // 可通过环境变量覆盖
+const TTS_API_KEY = process.env.TTS_API_KEY || '' // 必须在 .env 文件中配置
 
 /**
  * 向 TTS API 发送请求并返回音频 Blob
