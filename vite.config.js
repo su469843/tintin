@@ -1,10 +1,12 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
+import ttsProxyPlugin from './vite-plugins/ttsProxy.js'
 
 export default defineConfig({
   plugins: [
     vue(),
+    ttsProxyPlugin(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icons/*.svg'],
