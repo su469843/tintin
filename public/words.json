@@ -1,0 +1,47 @@
+{
+  "四级词汇": [
+    "abandon", "ability", "able", "abroad", "absence",
+    "absolute", "absorb", "abstract", "abuse", "academic",
+    "accelerate", "accent", "accept", "access", "accident",
+    "accompany", "accomplish", "account", "accurate", "accuse",
+    "achieve", "acknowledge", "acquire", "adapt", "addict",
+    "adequate", "adjust", "administration", "admire", "admit",
+    "adopt", "advance", "advantage", "advertise", "affair",
+    "affect", "affection", "afford", "aggressive", "agree",
+    "agriculture", "alcohol", "allow", "although", "altitude",
+    "amaze", "ambition", "analyze", "ancestor", "ancient",
+    "annual", "anticipate", "anxiety", "apparent", "appeal",
+    "appetite", "appliance", "application", "apply", "appoint",
+    "appreciate", "approach", "appropriate", "approve", "argue",
+    "arise", "arrange", "arrest", "article", "artificial",
+    "aspect", "assemble", "assess", "assign", "assist",
+    "associate", "assume", "assure", "atmosphere", "attach",
+    "attempt", "attend", "attitude", "attract", "attribute",
+    "audience", "authority", "automatic", "available", "avenue",
+    "average", "avoid", "award", "aware", "awful"
+  ],
+  "考研词汇": [
+    "abandon", "abdomen", "abide", "abolish", "abound",
+    "abrupt", "absence", "absorb", "abstract", "absurd",
+    "abundance", "abuse", "academy", "accelerate", "acceptance",
+    "access", "accessory", "accident", "acclaim", "accommodate",
+    "accompany", "accomplish", "accord", "account", "accumulate",
+    "accuracy", "accuse", "accustom", "achieve", "acknowledge",
+    "acquaint", "acquire", "activate", "acute", "adapt",
+    "addict", "additional", "adequate", "adhere", "adjust",
+    "administer", "admire", "admission", "adolescent", "adopt",
+    "advance", "adverse", "advocate", "aesthetic", "affair"
+  ],
+  "雅思核心": [
+    "abandon", "ability", "abolish", "absorb", "abstract",
+    "abuse", "academic", "accelerate", "access", "accompany",
+    "accomplish", "account", "accumulate", "accurate", "achieve",
+    "acknowledge", "acquire", "adapt", "adequate", "adjust",
+    "administration", "admission", "adopt", "advance", "advantage",
+    "adverse", "advocate", "affect", "aggregate", "aggressive",
+    "allocate", "alternative", "amateur", "ambition", "analysis",
+    "annual", "anticipate", "apparent", "appeal", "application",
+    "approach", "appropriate", "approximate", "artificial", "aspect",
+    "assemble", "assess", "assign", "assist", "associate"
+  ]
+}
