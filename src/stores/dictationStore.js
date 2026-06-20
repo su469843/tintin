@@ -60,13 +60,19 @@ export const useDictationStore = defineStore('dictation', () => {
   // ============================================================
   const total = computed(() => wordList.value.length)
 
-  /** 获取单词的英文部分（兼容字符串和 {en,zh} 对象） */
+  /** 获取单词的朗读/对比文本（兼容全部格式） */
   function getWordEn(w) {
-    return typeof w === 'object' && w !== null ? (w.en ?? '') : (w ?? '')
+    if (typeof w !== 'object' || w === null) return w ?? ''
+    if (w.word) return w.word      // { word, pinyin } 格式（语文）
+    if (w.en) return w.en          // { en, zh } 格式（英语）
+    return ''
   }
-  /** 获取单词的中文释义（兼容字符串和 {en,zh} 对象） */
+  /** 获取单词的释义/拼音（兼容全部格式） */
   function getWordZh(w) {
-    return typeof w === 'object' && w !== null ? (w.zh ?? '') : ''
+    if (typeof w !== 'object' || w === null) return ''
+    if (w.pinyin) return w.pinyin  // { word, pinyin } 格式 → 显示拼音
+    if (w.zh) return w.zh          // { en, zh } 格式 → 显示中文释义
+    return ''
   }
 
   /** 当前的英文单词（用于 TTS 朗读和输入对比） */

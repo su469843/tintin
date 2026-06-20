@@ -99,9 +99,10 @@ onMounted(async () => {
     }
   }
 
-  // 加载通用词库 + 六年级词库
+  // 加载通用词库 + 英语六年级 + 语文六年级词库
   const firstBank = await loadWordBank('/words.json')
-  const g6Bank = await loadWordBank('/words-g6.json')
+  await loadWordBank('/words-g6.json')
+  await loadWordBank('/words-g6-chinese.json')
 
   // 默认加载第一个词库
   if (firstBank) {
