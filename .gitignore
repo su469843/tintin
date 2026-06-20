@@ -4,4 +4,7 @@ dist/
 *.log
 .env
 test-*.png
+test-*.json
+test-*.mp3
 tts-*.png
+.wrangler/
