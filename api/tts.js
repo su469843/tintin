@@ -37,10 +37,13 @@ export default async function handler(req, res) {
   log('最终 apiKey 是否存在:', !!apiKey)
 
   if (!apiKey) {
-    log('⚠️ TTS_API_KEY 未配置，跳过 Authorization（测试无密码模式）')
-  } else {
-    log('✅ TTS_API_KEY 已配置，携带 Authorization 请求')
+    errLog('❌ TTS_API_KEY 未配置')
+    return res.status(500).json({
+      error: 'TTS API key not configured',
+      hint: '请在 Vercel Dashboard 设置 TTS_API_KEY，并与 Cloudflare Worker 的 API_KEY 保持一致'
+    })
   }
+  log('✅ 已携带 Authorization 请求')
 
   // 手动读取请求体（Vercel 不会自动解析 req.body）
   let rawBody = ''
