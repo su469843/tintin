@@ -7,6 +7,7 @@
  * 用户可在界面上看到"认证未配置"的错误提示。
  */
 import { createClient } from '@neondatabase/neon-js'
+import { BetterAuthVanillaAdapter } from '@neondatabase/auth/vanilla/adapters'
 
 const authUrl = import.meta.env.VITE_NEON_AUTH_URL
 
@@ -35,6 +36,7 @@ try {
   neonClient = createClient({
     auth: {
       url: authUrl,
+      adapter: BetterAuthVanillaAdapter(),
     },
     dataApi: {
       url: 'http://localhost:3000',
