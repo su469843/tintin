@@ -24,6 +24,23 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
+  // ============================================================
+  // 鉴权检查：验证用户 cookie（防止未登录滥用）
+  // 读取 BETTER_AUTH_SECRET 环境变量来解密 session JWT
+  // ============================================================
+  const cookies = (req.headers.cookie || '').split(';').map(c => c.trim()).filter(Boolean)
+  log('Cookies 数量:', cookies.length)
+
+  const authCookie = cookies.find(c => c.startsWith('better-auth.session_token='))
+  if (!authCookie) {
+    errLog('❌ 未检测到登录 session cookie，拒绝请求')
+    return res.status(401).json({ error: '未登录，请先登录' })
+  }
+  log('✅ 登录 session 有效')
+
+  // ============================================================
+  // TTS API Key 检查
+
   // 读取环境变量
   // ⚠️ VITE_ 前缀的变量在 Vite 构建时用于前端，serverless 函数可能拿不到
   // 所以优先读 TTS_API_KEY（无前缀），再回退到 VITE_TTS_API_KEY

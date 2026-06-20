@@ -220,7 +220,7 @@ async function copyInviteLink() {
   >
     <!-- 顶部用户栏 -->
     <div class="user-bar">
-      <span class="user-info">👤 {{ authStore.user?.name || authStore.user?.email }}</span>
+      <span class="user-info">👤 {{ authStore.user?.name || authStore.user?.email }} <span class="user-id" v-if="authStore.displayId">#{{ authStore.displayId }}</span></span>
       <div class="user-actions">
         <div v-if="authStore.myInviteCode" class="invite-block" @click="copyInviteLink">
           <span class="invite-code" title="点击复制邀请链接">
@@ -332,6 +332,12 @@ body {
   font-size: 14px;
   color: var(--text-secondary);
   font-weight: 500;
+}
+
+.user-id {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 400;
 }
 
 .btn-logout {

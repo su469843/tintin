@@ -18,6 +18,7 @@ export const useAuthStore = defineStore('auth', () => {
   const myInviteCode = ref(null) // 当前用户的邀请码
   const inviteRemaining = ref(0) // 剩余可邀请名额
   const inviteUsedCount = ref(0) // 已邀请人数
+  const displayId = ref(null)    // 8 位数字 ID
 
   // ============================================================
   // 计算属性
@@ -39,6 +40,14 @@ export const useAuthStore = defineStore('auth', () => {
       if (result?.data) {
         session.value = result.data
         user.value = result.data.user || null
+        // 加载 profile 信息
+        if (user.value?.id) {
+          try {
+            const resp = await fetch(`/api/profiles?userId=${encodeURIComponent(user.value.id)}`)
+            const json = await resp.json()
+            if (json.data?.display_id) displayId.value = json.data.display_id
+          } catch { /* ignore */ }
+        }
       }
     } catch (err) {
       console.warn('[Auth] getSession 失败:', err)
@@ -71,23 +80,21 @@ export const useAuthStore = defineStore('auth', () => {
         session.value = result.data
         user.value = result.data.user || null
 
-        // 注册成功后处理邀请码
+        // 注册成功后创建 profile + 邀请码
         const newUserId = result.data.user?.id
         if (newUserId) {
+          const displayId = await createProfile(newUserId, name)
+
           // 如果有邀请码，标记为已使用
           if (inviteCode) {
             await fetch('/api/invitations', {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                code: inviteCode,
-                userId: newUserId,
-                email: email,
-              }),
-            }).catch(() => {}) // 忽略失败
+              body: JSON.stringify({ code: inviteCode, userId: newUserId, email }),
+            }).catch(() => {})
           }
 
-          // 为新用户生成邀请码
+          // 生成邀请码
           await generateInviteCode(newUserId)
         }
       }
@@ -98,6 +105,27 @@ export const useAuthStore = defineStore('auth', () => {
     } finally {
       isLoading.value = false
     }
+  }
+
+  /**
+   * 创建用户资料（含 8 位数字 ID）
+   */
+  async function createProfile(userId, name) {
+    try {
+      const resp = await fetch('/api/profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, name: name || '' }),
+      })
+      const json = await resp.json()
+      if (json.data?.display_id) {
+        displayId.value = json.data.display_id
+        return json.data.display_id
+      }
+    } catch (err) {
+      console.warn('[Auth] 创建 profile 失败:', err.message)
+    }
+    return null
   }
 
   /**
@@ -194,6 +222,7 @@ export const useAuthStore = defineStore('auth', () => {
     myInviteCode,
     inviteRemaining,
     inviteUsedCount,
+    displayId,
     // 计算属性
     isLoggedIn,
     userId,
