@@ -82,23 +82,30 @@ onMounted(async () => {
     save(STORAGE_KEYS.DAILY_STATS, state.dailyStats)
   })
 
-  // 从 /words.json 加载词库
-  try {
-    const resp = await fetch('/words.json')
-    const data = await resp.json()
+  // 从 /words.json 加载内置词库
+  async function loadWordBank(url) {
+    try {
+      const resp = await fetch(url)
+      const data = await resp.json()
 
-    // 注册所有内置词库
-    Object.entries(data).forEach(([name, words]) => {
-      store.importBank(name, words)
-    })
+      Object.entries(data).forEach(([name, words]) => {
+        store.importBank(name, words)
+      })
 
-    // 加载第一个词库
-    const firstBank = Object.keys(data)[0]
-    if (firstBank) {
-      store.loadWordBank(firstBank, data[firstBank])
+      return Object.keys(data)[0]
+    } catch (err) {
+      console.error(`词库加载失败 (${url}):`, err)
+      return null
     }
-  } catch (err) {
-    console.error('词库加载失败:', err)
+  }
+
+  // 加载通用词库 + 六年级词库
+  const firstBank = await loadWordBank('/words.json')
+  const g6Bank = await loadWordBank('/words-g6.json')
+
+  // 默认加载第一个词库
+  if (firstBank) {
+    store.loadWordBank(firstBank, store.customBanks[firstBank])
   }
 })
 

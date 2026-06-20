@@ -36,7 +36,7 @@ export const useDictationStore = defineStore('dictation', () => {
   // ============================================================
   // ❌ 错词本
   // ============================================================
-  /** 错词列表 { word, yourAnswer, timestamp } */
+  /** 错词列表 { word, wordZh, yourAnswer, timestamp } */
   const wrongWords = ref([])
 
   // ============================================================
@@ -59,7 +59,20 @@ export const useDictationStore = defineStore('dictation', () => {
   // 📐 计算属性
   // ============================================================
   const total = computed(() => wordList.value.length)
-  const currentWord = computed(() => wordList.value[currentIndex.value] ?? '')
+
+  /** 获取单词的英文部分（兼容字符串和 {en,zh} 对象） */
+  function getWordEn(w) {
+    return typeof w === 'object' && w !== null ? (w.en ?? '') : (w ?? '')
+  }
+  /** 获取单词的中文释义（兼容字符串和 {en,zh} 对象） */
+  function getWordZh(w) {
+    return typeof w === 'object' && w !== null ? (w.zh ?? '') : ''
+  }
+
+  /** 当前的英文单词（用于 TTS 朗读和输入对比） */
+  const currentWord = computed(() => getWordEn(wordList.value[currentIndex.value]))
+  /** 当前单词的中文释义（用于界面显示） */
+  const currentWordZh = computed(() => getWordZh(wordList.value[currentIndex.value]))
   const progressText = computed(() => `第 ${currentIndex.value + 1} / ${total.value} 个`)
   const today = computed(() => new Date().toISOString().slice(0, 10))
   const todayStats = computed(() => dailyStats.value[today.value] ?? { total: 0, correct: 0, wrong: 0 })
@@ -92,8 +105,10 @@ export const useDictationStore = defineStore('dictation', () => {
       isCorrect.value = true
     } else {
       isCorrect.value = false
+      const raw = wordList.value[currentIndex.value]
       wrongWords.value.push({
         word: currentWord.value,
+        wordZh: getWordZh(raw),
         yourAnswer: inputText.value.trim(),
         timestamp: Date.now()
       })
@@ -183,7 +198,9 @@ export const useDictationStore = defineStore('dictation', () => {
     wrongWords, dailyStats, learnedCount,
     playMode, autoNext,
     // 计算属性
-    total, currentWord, progressText, today, todayStats,
+    total, currentWord, currentWordZh, progressText, today, todayStats,
+    // 工具函数
+    getWordEn, getWordZh,
     // 动作
     loadWordBank, submitAnswer, nextWord,
     setPlaying, setStatus, resetCurrent, resetAll,

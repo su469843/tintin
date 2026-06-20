@@ -113,7 +113,10 @@ const todayStatus = computed(() => {
           :key="i"
           class="wrong-item"
         >
-          <span class="wrong-word">{{ item.word }}</span>
+          <div class="wrong-word-block">
+            <span class="wrong-word">{{ item.word }}</span>
+            <span v-if="item.wordZh" class="wrong-zh">{{ item.wordZh }}</span>
+          </div>
           <span class="wrong-answer">你写: {{ item.yourAnswer }}</span>
         </div>
       </div>
@@ -298,14 +301,27 @@ const todayStatus = computed(() => {
   border-radius: 8px;
 }
 
+.wrong-word-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .wrong-word {
   font-size: 16px;
   font-weight: 700;
   color: var(--text-primary, #1e293b);
 }
 
+.wrong-zh {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted, #94a3b8);
+}
+
 .wrong-answer {
   font-size: 13px;
   color: var(--text-muted, #94a3b8);
+  text-align: right;
 }
 </style>

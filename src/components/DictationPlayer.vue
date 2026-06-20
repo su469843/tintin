@@ -280,7 +280,10 @@ function skipWord() {
         <p v-if="store.playMode === 'blind' && !store.isSubmitted" class="word-hidden">
           ···
         </p>
-        <p v-else class="word">{{ store.currentWord }}</p>
+        <div v-else class="word-block">
+          <p class="word-en">{{ store.currentWord }}</p>
+          <p v-if="store.currentWordZh" class="word-zh">{{ store.currentWordZh }}</p>
+        </div>
       </template>
       <p v-else class="celebrate">🎉 全部完成！</p>
     </div>
@@ -341,10 +344,11 @@ function skipWord() {
     <!-- 答题反馈 -->
     <div v-if="store.isSubmitted" class="feedback" :class="{ correct: store.isCorrect, wrong: !store.isCorrect }">
       <template v-if="store.isCorrect">
-        ✅ 正确！
+        ✅ 正确！{{ store.currentWordZh ? '(' + store.currentWordZh + ')' : '' }}
       </template>
       <template v-else>
         ❌ 错误，正确答案：<strong>{{ store.currentWord }}</strong>
+        <span v-if="store.currentWordZh">（{{ store.currentWordZh }}）</span>
       </template>
     </div>
   </div>
@@ -366,12 +370,26 @@ function skipWord() {
   justify-content: center;
 }
 
-.word {
+.word-block {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.word-en {
   font-size: 52px;
   font-weight: 800;
   color: var(--text-primary, #1e293b);
   letter-spacing: 2px;
-  text-align: center;
+  margin: 0;
+}
+
+.word-zh {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-muted, #94a3b8);
   margin: 0;
 }
 
