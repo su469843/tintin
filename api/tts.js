@@ -37,14 +37,9 @@ export default async function handler(req, res) {
   log('最终 apiKey 是否存在:', !!apiKey)
 
   if (!apiKey) {
-    errLog('❌ API Key 未配置')
-    errLog('请在 Vercel Dashboard 中设置环境变量 TTS_API_KEY')
-    return res.status(500).json({
-      error: 'TTS API key not configured',
-      hint: '请在 Vercel Dashboard → Settings → Environment Variables 中添加 ', 
-      variableName: 'TTS_API_KEY',
-      alsoTried: 'VITE_TTS_API_KEY'
-    })
+    log('⚠️ TTS_API_KEY 未配置，跳过 Authorization（测试无密码模式）')
+  } else {
+    log('✅ TTS_API_KEY 已配置，携带 Authorization 请求')
   }
 
   // 手动读取请求体（Vercel 不会自动解析 req.body）
@@ -104,7 +99,7 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
+        ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
       },
       body: forwardBody
     })
