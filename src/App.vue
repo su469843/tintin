@@ -207,8 +207,14 @@ async function copyInviteLink() {
 </script>
 
 <template>
+  <!-- 初始化中：显示加载动画，避免登录页闪烁 -->
+  <div v-if="!authStore.isInitialized" class="loading-screen">
+    <div class="loading-spinner"></div>
+    <p class="loading-text">加载中...</p>
+  </div>
+
   <!-- 未登录：显示登录/注册界面 -->
-  <AuthView v-if="!authStore.isInitialized || !authStore.isLoggedIn" />
+  <AuthView v-else-if="!authStore.isLoggedIn" />
 
   <!-- 已登录：主应用 -->
   <div
@@ -389,6 +395,35 @@ body {
 
 .invite-count {
   font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* 初始化加载动画 */
+.loading-screen {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: var(--bg-primary);
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid var(--bg-secondary);
+  border-top: 4px solid #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: 15px;
   color: var(--text-muted);
 }
 
