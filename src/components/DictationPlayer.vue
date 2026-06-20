@@ -198,6 +198,57 @@ function prevWordPaper() {
   }
 }
 
+// ============================================================
+// 纸笔模式：自动续播
+// ============================================================
+let autoPlayTimer = null
+const isAutoPlaying = ref(false)
+
+/** 开始/停止自动续播 */
+function toggleAutoPlay() {
+  if (isAutoPlaying.value) {
+    stopAutoPlay()
+  } else {
+    startAutoPlay()
+  }
+}
+
+function startAutoPlay() {
+  if (store.isFinished || store.paperPhase !== 'playing') return
+  isAutoPlaying.value = true
+  playCurrentAndSchedule()
+}
+
+function stopAutoPlay() {
+  isAutoPlaying.value = false
+  if (autoPlayTimer) {
+    clearTimeout(autoPlayTimer)
+    autoPlayTimer = null
+  }
+}
+
+async function playCurrentAndSchedule() {
+  if (!isAutoPlaying.value || store.paperPhase !== 'playing') return
+
+  await speakCurrent()
+
+  if (!isAutoPlaying.value || store.paperPhase !== 'playing') return
+
+  // 检查是否是最后一个
+  if (store.currentIndex >= store.total - 1) {
+    store.paperFinish()
+    isAutoPlaying.value = false
+    return
+  }
+
+  // 按设置的间隔自动进入下一词
+  autoPlayTimer = setTimeout(() => {
+    if (!isAutoPlaying.value) return
+    nextWordPaper()
+    playCurrentAndSchedule()
+  }, store.paperInterval * 1000)
+}
+
 // 纯听力模式：切换到此词时自动朗读
 watch(() => store.currentIndex, () => {
   if (store.dictationMode === 'listening' && !store.isFinished) {
@@ -271,41 +322,40 @@ function restartDictation() {
          上面中文提示，下面播报 + 上/下一个
     ============================================================ -->
     <template v-else-if="store.dictationMode === 'paper' && store.paperPhase === 'playing'">
+      <!-- 模式选择器 -->
       <div class="mode-selector">
-        <button :class="{ active: store.dictationMode === 'display' }" @click="store.setDictationMode('display')">👁 屏幕</button>
-        <button :class="{ active: store.dictationMode === 'chinese_only' }" @click="store.setDictationMode('chinese_only')">📝 中文提示</button>
-        <button :class="{ active: store.dictationMode === 'listening' }" @click="store.setDictationMode('listening')">👂 纯听力</button>
+        <button :class="{ active: store.dictationMode === 'display' }" @click="stopAutoPlay(); store.setDictationMode('display')">👁 屏幕</button>
+        <button :class="{ active: store.dictationMode === 'chinese_only' }" @click="stopAutoPlay(); store.setDictationMode('chinese_only')">📝 中文提示</button>
+        <button :class="{ active: store.dictationMode === 'listening' }" @click="stopAutoPlay(); store.setDictationMode('listening')">👂 纯听力</button>
         <button :class="{ active: store.dictationMode === 'paper' }" @click="store.setDictationMode('paper')">📄 纸笔</button>
       </div>
+
       <div class="paper-playing">
         <!-- 进度 -->
         <p class="paper-progress">{{ store.currentIndex + 1 }} / {{ store.total }}</p>
 
         <!-- 中文提示 -->
-        <div class="paper-hint" @click="store.showHint = !store.showHint">
-          <template v-if="store.currentWordZh">
-            <p class="hint-zh">{{ store.currentWordZh }}</p>
-            <p class="hint-tap">{{ store.showHint ? '点击隐藏' : '点击显示答案' }}</p>
-          </template>
-          <p v-else class="hint-en">{{ store.currentWord }}</p>
+        <div class="paper-hint-area">
+          <p v-if="store.currentWordZh" class="paper-hint-text">{{ store.currentWordZh }}</p>
+          <p v-else class="paper-hint-text">{{ store.currentWord }}</p>
         </div>
 
-        <!-- 答案（点击提示后显示） -->
-        <transition name="fade">
-          <p v-if="store.showHint && store.currentWordZh" class="paper-answer">
-            {{ store.currentWord }}
-          </p>
-        </transition>
+        <!-- 状态 -->
+        <p v-if="store.statusMsg" class="status">{{ store.statusMsg }}</p>
+        <p v-else-if="isAutoPlaying" class="paper-sub-hint">
+          自动续播中，{{ store.paperInterval }} 秒后下一个
+        </p>
+        <p v-else class="paper-sub-hint">点击 ▶ 开始自动听写</p>
 
-        <!-- 控制按钮 -->
+        <!-- 控制栏 -->
         <div class="paper-controls">
-          <button class="btn btn-secondary" :disabled="store.currentIndex === 0" @click="prevWordPaper">
+          <button class="btn btn-secondary" :disabled="store.currentIndex === 0" @click="stopAutoPlay(); prevWordPaper()">
             ◀ 上一个
           </button>
-          <button class="btn btn-primary" :disabled="store.isPlaying" @click="speakCurrent">
-            🔊 播报
+          <button class="btn btn-primary btn-play" @click="toggleAutoPlay">
+            {{ isAutoPlaying ? '⏸' : '▶' }}
           </button>
-          <button class="btn btn-secondary" :disabled="store.isPlaying" @click="nextWordPaper">
+          <button class="btn btn-secondary" @click="stopAutoPlay(); nextWordPaper()">
             下一个 ▶
           </button>
         </div>
@@ -902,5 +952,113 @@ function restartDictation() {
 .result-actions {
   display: flex;
   gap: 12px;
+}
+
+/* ===== 纸笔模式 ===== */
+.paper-setup {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.setup-title { font-size: 22px; font-weight: 700; margin: 0; }
+.setup-group { display: flex; flex-direction: column; gap: 8px; }
+.setup-label { font-size: 15px; font-weight: 600; color: var(--text-secondary); }
+.setup-slider { width: 100%; height: 6px; }
+.repeat-options { display: flex; gap: 8px; }
+.repeat-options button {
+  flex: 1; height: 44px; border: 2px solid var(--border-color);
+  border-radius: 10px; background: var(--bg-card);
+  color: var(--text-secondary); font-size: 15px; font-weight: 600;
+  cursor: pointer; transition: all 0.2s;
+}
+.repeat-options button.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.btn-start { width: 100%; height: 56px; font-size: 18px; margin-top: 8px; }
+
+.paper-playing {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+.paper-progress {
+  font-size: 16px;
+  color: var(--text-muted);
+  margin: 0;
+}
+.paper-hint-area {
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.paper-hint-text {
+  font-size: 52px;
+  font-weight: 800;
+  color: var(--text-primary);
+  text-align: center;
+  margin: 0;
+  letter-spacing: 2px;
+}
+.paper-sub-hint {
+  font-size: 15px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.paper-controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+.btn-play {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  font-size: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
+}
+
+/* 纸笔模式：标记阶段 */
+.paper-marking { width: 100%; display: flex; flex-direction: column; gap: 16px; }
+.marking-title { font-size: 20px; font-weight: 700; margin: 0; }
+.marking-hint { font-size: 14px; color: var(--text-muted); margin: 0; }
+.marking-list { display: flex; flex-direction: column; gap: 8px; max-height: 400px; overflow-y: auto; }
+.marking-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; background: var(--bg-card);
+  border-radius: 12px; cursor: pointer; transition: all 0.15s;
+  border: 2px solid var(--border-color);
+}
+.marking-item.wrong { border-color: #ef4444; background: #fef2f2; }
+.marking-word { display: flex; flex-direction: column; gap: 2px; }
+.marking-en { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+.marking-zh { font-size: 14px; color: var(--text-muted); }
+.marking-status { font-size: 24px; }
+.marking-actions { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.marking-summary { font-size: 15px; color: var(--text-muted); margin: 0; }
+
+/* 纸笔模式：庆祝动画 */
+.celebration-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.5); z-index: 100;
+}
+.celebration-text { text-align: center; color: #fff; z-index: 101; }
+.celebration-text h2 { font-size: 36px; margin: 12px 0; }
+.celebration-text p { font-size: 18px; opacity: 0.9; }
+.big-star { font-size: 80px; }
+.confetti-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 99; }
+.confetti {
+  position: absolute; top: -10px; width: 10px; height: 10px;
+  border-radius: 2px; animation: confetti-fall 3s ease-in-out infinite;
+}
+@keyframes confetti-fall {
+  0% { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
 }
 </style>
