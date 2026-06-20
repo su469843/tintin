@@ -399,6 +399,14 @@ function restartDictation() {
     ============================================================ -->
     <template v-else>
 
+    <!-- 模式选择器 -->
+    <div v-if="!store.isFinished" class="mode-selector">
+      <button :class="{ active: store.dictationMode === 'display' }" @click="store.setDictationMode('display')">👁 屏幕</button>
+      <button :class="{ active: store.dictationMode === 'chinese_only' }" @click="store.setDictationMode('chinese_only')">📝 中文提示</button>
+      <button :class="{ active: store.dictationMode === 'listening' }" @click="store.setDictationMode('listening')">👂 纯听力</button>
+      <button :class="{ active: store.dictationMode === 'paper' }" @click="store.setDictationMode('paper')">📄 纸笔</button>
+    </div>
+
     <!-- ============ 本轮完成：结果展示 ============ -->
     <div v-if="store.isFinished" class="session-result">
       <h3 class="result-title">🎉 听写完成！</h3>
@@ -582,15 +590,16 @@ function restartDictation() {
 /* 模式选择器 */
 .mode-selector {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   background: var(--bg-card, #fff);
   border-radius: 12px;
   padding: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  margin-bottom: 16px;
 }
 
-.mode-btn {
-  padding: 8px 20px;
+.mode-selector button {
+  padding: 6px 16px;
   border: none;
   border-radius: 10px;
   background: transparent;
@@ -599,9 +608,10 @@ function restartDictation() {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+  white-space: nowrap;
 }
 
-.mode-btn.active {
+.mode-selector button.active {
   background: #3b82f6;
   color: #fff;
   box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);

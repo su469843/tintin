@@ -29,7 +29,7 @@ onMounted(() => {
 // 邀请码开关：设为 true 启用邀请码验证
 // 首次注册时可设为 false，注册成功后再开启
 // ============================================================
-const REQUIRE_INVITE = false // ← 控制是否需要邀请码
+const REQUIRE_INVITE = true // ← 控制是否需要邀请码
 
 /** 注册时验证邀请码 */
 async function validateInviteCode(code) {
