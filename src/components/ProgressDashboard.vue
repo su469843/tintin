@@ -1,21 +1,21 @@
 <script setup>
 /**
  * ProgressDashboard.vue - 进度看板
- * 今日正确率、学习时长、错词列表
+ * 今日正确率、近 7 天趋势、错词概览
+ *
+ * 数据来源：PostgreSQL（通过 store 的 fetchStats 加载）
  */
 import { computed } from 'vue'
 import { useDictationStore } from '../stores/dictationStore'
 
 const store = useDictationStore()
 
-/** 今日正确率百分比 */
 const accuracyRate = computed(() => {
   const { total, correct } = store.todayStats
   if (total === 0) return 0
   return Math.round((correct / total) * 100)
 })
 
-/** 最近一周的统计数据 */
 const weekStats = computed(() => {
   const stats = []
   for (let i = 6; i >= 0; i--) {
@@ -24,7 +24,7 @@ const weekStats = computed(() => {
     const key = d.toISOString().slice(0, 10)
     const dayData = store.dailyStats[key]
     stats.push({
-      date: key.slice(5), // MM-DD
+      date: key.slice(5),
       total: dayData?.total ?? 0,
       correct: dayData?.correct ?? 0,
       rate: dayData?.total ? Math.round((dayData.correct / dayData.total) * 100) : 0
@@ -33,17 +33,24 @@ const weekStats = computed(() => {
   return stats
 })
 
-/** 今日状态文本 */
 const todayStatus = computed(() => {
   const { total, correct, wrong } = store.todayStats
   if (total === 0) return '今天还没有练习'
   return `练习 ${total} 词 · 正确 ${correct} · 错误 ${wrong}`
 })
+
+/** 从数据库刷新统计数据 */
+async function refreshData() {
+  await Promise.all([store.fetchStats(), store.fetchWrongWords()])
+}
 </script>
 
 <template>
   <div class="progress-dashboard">
-    <h3 class="section-title">📊 学习进度</h3>
+    <div class="dashboard-header">
+      <h3 class="section-title">📊 学习进度</h3>
+      <button class="refresh-btn" @click="refreshData" title="刷新数据">🔄</button>
+    </div>
 
     <!-- 今日概览 -->
     <div class="today-card">
@@ -71,11 +78,7 @@ const todayStatus = computed(() => {
     <div class="week-stats">
       <p class="sub-title">近 7 天趋势</p>
       <div class="bar-chart">
-        <div
-          v-for="day in weekStats"
-          :key="day.date"
-          class="bar-item"
-        >
+        <div v-for="day in weekStats" :key="day.date" class="bar-item">
           <div class="bar-wrapper">
             <div
               class="bar"
@@ -92,34 +95,18 @@ const todayStatus = computed(() => {
       </div>
     </div>
 
-    <!-- 错词本 -->
-    <div class="wrong-words-section">
+    <!-- 错词概览（链接到错词本标签） -->
+    <div class="wrong-summary">
       <div class="wrong-header">
-        <p class="sub-title">❌ 错词本（{{ store.wrongWords.length }}）</p>
-        <button
-          v-if="store.wrongWords.length > 0"
-          class="clear-btn"
-          @click="store.clearWrongWords"
-        >
-          清空
-        </button>
+        <p class="sub-title">❌ 错词本</p>
+        <span class="wrong-count">{{ store.wrongWords.length }} 个</span>
       </div>
-      <div v-if="store.wrongWords.length === 0" class="empty-state">
+      <p v-if="store.wrongWords.length === 0" class="empty-hint">
         🎉 暂无错词，继续保持！
-      </div>
-      <div v-else class="wrong-list">
-        <div
-          v-for="(item, i) in store.wrongWords"
-          :key="i"
-          class="wrong-item"
-        >
-          <div class="wrong-word-block">
-            <span class="wrong-word">{{ item.word }}</span>
-            <span v-if="item.wordZh" class="wrong-zh">{{ item.wordZh }}</span>
-          </div>
-          <span class="wrong-answer">你写: {{ item.yourAnswer }}</span>
-        </div>
-      </div>
+      </p>
+      <p v-else class="wrong-hint">
+        切换到「📝 错词」标签查看详情并开始复习
+      </p>
     </div>
   </div>
 </template>
@@ -132,11 +119,33 @@ const todayStatus = computed(() => {
   gap: 20px;
 }
 
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .section-title {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
   color: var(--text-primary, #1e293b);
+}
+
+.refresh-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 10px;
+  background: var(--bg-card, #fff);
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: transform 0.2s;
+}
+
+.refresh-btn:active {
+  transform: scale(0.9);
 }
 
 .sub-title {
@@ -249,7 +258,7 @@ const todayStatus = computed(() => {
   color: var(--text-muted, #94a3b8);
 }
 
-.wrong-words-section {
+.wrong-summary {
   padding: 16px;
   background: var(--bg-card, #fff);
   border-radius: 16px;
@@ -260,68 +269,30 @@ const todayStatus = computed(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .wrong-header .sub-title {
   margin: 0;
 }
 
-.clear-btn {
-  padding: 4px 12px;
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 8px;
-  background: none;
-  color: var(--text-muted, #94a3b8);
-  font-size: 12px;
-  cursor: pointer;
+.wrong-count {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ef4444;
 }
 
-.empty-state {
+.empty-hint {
   text-align: center;
-  padding: 20px;
   color: var(--text-muted, #94a3b8);
   font-size: 15px;
+  margin: 0;
+  padding: 8px 0;
 }
 
-.wrong-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.wrong-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  background: var(--bg-secondary, #fef2f2);
-  border-radius: 8px;
-}
-
-.wrong-word-block {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.wrong-word {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary, #1e293b);
-}
-
-.wrong-zh {
-  font-size: 13px;
-  font-weight: 500;
+.wrong-hint {
   color: var(--text-muted, #94a3b8);
-}
-
-.wrong-answer {
-  font-size: 13px;
-  color: var(--text-muted, #94a3b8);
-  text-align: right;
+  font-size: 14px;
+  margin: 0;
 }
 </style>

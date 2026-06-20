@@ -1,182 +1,95 @@
 <script setup>
 /**
- * DictationPlayer.vue - 核心听写区
- * 显示当前单词、播放控制、输入对比
+ * DictationPlayer.vue - 核心听写区（双模式）
+ *
+ * 模式 A - 屏幕显示：显示单词 + 释义/拼音，用户看着屏幕听写
+ * 模式 B - 纯听力：屏幕无任何文字提示，只播放音频，完成后统一揭晓
  *
  * 语音策略（三引擎降级）：
- *   1. 后端 TTS 代理（/api/tts → tts.519965.xyz），需配置 TTS_API_KEY
- *   2. edge-tts-universal（浏览器 WebSocket 连微软 Edge TTS）
- *   3. 浏览器内置 Web Speech API（最终降级）
+ *   1. 后端 TTS 代理（/api/tts → tts.519965.xyz）
+ *   2. edge-tts-universal（浏览器 WebSocket）
+ *   3. Web Speech API（最终降级）
  */
-import { ref } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { useDictationStore } from '../stores/dictationStore'
 import { EdgeTTS } from 'edge-tts-universal/browser'
 
-// ============================================================
-// 🎙️ 语音配置
-// ============================================================
-// TTS API 语音角色
 const TTS_VOICE = 'en-US-JennyNeural'
-// 如需中文语音，改为：
-// const TTS_VOICE = 'zh-CN-XiaoxiaoNeural'
-
-// Web Speech API 回退语音语言
 const SPEECH_LANG = 'en-US'
-// 如需中文，改为：
-// const SPEECH_LANG = 'zh-CN'
 
 const store = useDictationStore()
+const ttsEngine = ref('api')
 
-/** 标记当前使用的语音引擎 */
-const ttsEngine = ref('api') // 'api' | 'edge' | 'web'
-
-/**
- * 根据文本自动检测语言，返回对应语音角色
- */
+// ============================================================
+// 语音检测
+// ============================================================
 function detectVoice(text) {
   if (/[\u4e00-\u9fa5]/.test(text)) return 'zh-CN-XiaoxiaoNeural'
   if (/[\u3040-\u30ff]/.test(text)) return 'ja-JP-NanamiNeural'
   if (/[\uAC00-\uD7AF]/.test(text)) return 'ko-KR-SunHiNeural'
-  return TTS_VOICE // 默认英文
+  return TTS_VOICE
 }
 
 // ============================================================
-// 🅰️ 引擎 1：后端 TTS 代理（带 10 秒超时）
+// 引擎 1：后端 TTS 代理
 // ============================================================
 async function speakWithAPI(text) {
   const TIMEOUT_MS = 10000
-  const reqId = Date.now().toString(36)
-
   const fetchPromise = (async () => {
     const voice = detectVoice(text)
-
-    console.group(`[TTS:${reqId}] 🅰️ 尝试 TTS API`)
-    console.log('朗读文本:', text)
-    console.log('语音角色:', voice)
-
-    let resp
-    try {
-      resp = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'tts-1',
-          input: text,
-          voice: voice,
-          speed: 0.9,
-        }),
-      })
-      console.log('响应状态:', resp.status, resp.statusText)
-    } catch (err) {
-      console.error('网络请求失败:', err.message)
-      console.groupEnd()
-      throw new Error(`网络错误: ${err.message}`)
-    }
-
+    const resp = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'tts-1', input: text, voice, speed: 0.9 }),
+    })
     if (!resp.ok) {
-      let errData = {}
-      try {
-        errData = await resp.json()
-        console.error('API 错误详情:', errData)
-      } catch {
-        const errText = await resp.text().catch(() => '')
-        console.error('API 错误(非JSON, 前200字符):', errText.substring(0, 200))
-      }
-      console.groupEnd()
-      throw new Error(errData.error || errData.upstream_body || `TTS API 返回 ${resp.status}`)
+      const errData = await resp.json().catch(() => ({}))
+      throw new Error(errData.error || `TTS API ${resp.status}`)
     }
-
-    console.log('正在读取音频流...')
     const blob = await resp.blob()
-    console.log('音频大小:', blob.size, 'bytes')
-
-    if (blob.size === 0) {
-      console.error('收到空音频')
-      console.groupEnd()
-      throw new Error('TTS 返回空音频')
-    }
-
+    if (blob.size === 0) throw new Error('TTS 返回空音频')
     const url = URL.createObjectURL(blob)
     const audioEl = new Audio(url)
-
-    console.log('开始播放音频...')
     await new Promise((resolve, reject) => {
-      audioEl.onended = () => {
-        console.log('播放完成')
-        resolve()
-      }
-      audioEl.onerror = () => reject(new Error('Audio playback error'))
+      audioEl.onended = resolve
+      audioEl.onerror = () => reject(new Error('Audio error'))
       audioEl.play().catch(reject)
     })
-
     URL.revokeObjectURL(url)
-    console.log('✅ TTS API 朗读成功')
-    console.groupEnd()
   })()
 
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => {
-      console.error(`[TTS:${reqId}] ❌ 请求超时 (${TIMEOUT_MS}ms)`)
-      reject(new Error('TTS API 超时'))
-    }, TIMEOUT_MS)
+    setTimeout(() => reject(new Error('TTS API 超时')), TIMEOUT_MS)
   )
-
   await Promise.race([fetchPromise, timeoutPromise])
 }
 
 // ============================================================
-// 🅱️ 引擎 2：edge-tts-universal（浏览器端，微软 Edge TTS WebSocket）
-//    注意：该库在 WebSocket 失败时可能不 reject，故加 5 秒超时
+// 引擎 2：edge-tts-universal
 // ============================================================
 async function speakWithEdgeTTS(text) {
   const TIMEOUT_MS = 5000
-  const reqId = Date.now().toString(36)
-
   const ttsPromise = (async () => {
-    console.group(`[TTS:${reqId}] 🅱️ 尝试 edge-tts-universal`)
-    console.log('朗读文本:', text)
-
     const tts = new EdgeTTS(text, TTS_VOICE)
-    console.log('正在合成语音...')
     const { audio } = await tts.synthesize()
-    console.log('合成成功，音频大小:', audio.size, 'bytes')
-
-    if (audio.size === 0) {
-      console.error('合成结果为空')
-      console.groupEnd()
-      throw new Error('EdgeTTS 返回空音频')
-    }
-
+    if (audio.size === 0) throw new Error('EdgeTTS 空音频')
     const url = URL.createObjectURL(audio)
     const audioEl = new Audio(url)
-
-    console.log('开始播放...')
     await new Promise((resolve, reject) => {
-      audioEl.onended = () => {
-        console.log('播放完成')
-        resolve()
-      }
-      audioEl.onerror = () => reject(new Error('Audio playback error'))
+      audioEl.onended = resolve
+      audioEl.onerror = () => reject(new Error('Audio error'))
       audioEl.play().catch(reject)
     })
-
     URL.revokeObjectURL(url)
-    console.log('✅ edge-tts 朗读成功')
-    console.groupEnd()
   })()
-
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => {
-      console.error(`[TTS:${reqId}] ❌ edge-tts 超时 (${TIMEOUT_MS}ms)`)
-      reject(new Error('edge-tts 超时'))
-    }, TIMEOUT_MS)
+    setTimeout(() => reject(new Error('edge-tts 超时')), TIMEOUT_MS)
   )
-
   await Promise.race([ttsPromise, timeoutPromise])
 }
 
 // ============================================================
-// 🅲 引擎 3：浏览器内置 Web Speech API（最终降级）
+// 引擎 3：Web Speech API
 // ============================================================
 function speakWithWebSpeech(text) {
   return new Promise((resolve, reject) => {
@@ -184,75 +97,57 @@ function speakWithWebSpeech(text) {
     utterance.lang = SPEECH_LANG
     utterance.rate = 0.9
     utterance.onend = resolve
-    utterance.onerror = (e) => reject(new Error(`Web Speech error: ${e.error}`))
+    utterance.onerror = (e) => reject(new Error(`Web Speech: ${e.error}`))
     speechSynthesis.speak(utterance)
   })
 }
 
 // ============================================================
-// 🎯 统一入口：三引擎逐级降级
+// 统一入口：三引擎降级
 // ============================================================
-/** 朗读当前单词（API → edge-tts → Web Speech，逐级降级） */
 async function speakCurrent() {
   if (store.isPlaying || store.isFinished) return
   store.setPlaying(true)
-
   const word = store.currentWord
-  const reqId = Date.now().toString(36)
 
-  console.group(`[TTS:${reqId}] 🎯 开始朗读: "${word}"`)
-  console.log('当前引擎:', ttsEngine.value)
-
-  // --- 引擎 1：TTS API ---
   if (ttsEngine.value === 'api') {
     store.setStatus('正在朗读...')
     try {
       await speakWithAPI(word)
-      store.setStatus('')
-      store.setPlaying(false)
-      console.groupEnd()
-      return
+      store.setStatus(''); store.setPlaying(false); return
     } catch (err) {
-      console.warn('⚠️ TTS API 失败，降级到 edge-tts:', err.message)
       ttsEngine.value = 'edge'
     }
   }
-
-  // --- 引擎 2：edge-tts-universal ---
   if (ttsEngine.value === 'edge') {
     store.setStatus('正在朗读（Edge TTS）...')
     try {
       await speakWithEdgeTTS(word)
-      store.setStatus('')
-      store.setPlaying(false)
-      console.groupEnd()
-      return
+      store.setStatus(''); store.setPlaying(false); return
     } catch (err) {
-      console.warn('⚠️ edge-tts 失败，降级到 Web Speech:', err.message)
       ttsEngine.value = 'web'
     }
   }
-
-  // --- 引擎 3：Web Speech API（最终降级）---
   store.setStatus('正在朗读（内置语音）...')
   try {
     await speakWithWebSpeech(word)
     store.setStatus('')
   } catch (err) {
-    console.error('❌ 所有语音引擎均失败:', err)
     store.setStatus('朗读出错，请重试')
   } finally {
     store.setPlaying(false)
-    console.groupEnd()
   }
 }
 
-/** 提交输入答案 */
+// ============================================================
+// 交互逻辑
+// ============================================================
+
 function handleSubmit() {
   store.submitAnswer()
 }
 
-/** 继续下一词（答对后自动/手动） */
+/** 显示模式下的下一词 */
 function handleNext() {
   if (store.isSubmitted && store.isCorrect) {
     store.nextWord()
@@ -262,100 +157,214 @@ function handleNext() {
   }
 }
 
-/** 手动下一词（跳过） */
+/** 跳过当前词 */
 function skipWord() {
   store.nextWord()
   if (!store.isFinished) {
     setTimeout(() => speakCurrent(), 400)
   }
 }
+
+/** 纯听力模式：提交后直接下一词（不显示对错） */
+function handleListeningNext() {
+  if (!store.isSubmitted) return
+  store.nextWord()
+  if (!store.isFinished) {
+    setTimeout(() => speakCurrent(), 400)
+  }
+}
+
+// 纯听力模式：切换到此词时自动朗读
+watch(() => store.currentIndex, () => {
+  if (store.dictationMode === 'listening' && !store.isFinished) {
+    nextTick(() => {
+      setTimeout(() => speakCurrent(), 300)
+    })
+  }
+})
+
+/** 重新开始听写（当前词库） */
+function restartDictation() {
+  const name = store.currentBank
+  const words = [...store.wordList]
+  store.loadWordBank(name, words)
+  setTimeout(() => speakCurrent(), 400)
+}
 </script>
 
 <template>
   <div class="dictation-player">
-    <!-- 单词展示 -->
-    <div class="word-display">
-      <template v-if="!store.isFinished">
-        <!-- 盲听模式：隐藏单词 -->
-        <p v-if="store.playMode === 'blind' && !store.isSubmitted" class="word-hidden">
-          ···
-        </p>
-        <!-- 语文词库：只显示拼音，隐藏中文（中文是听写答案） -->
-        <div v-else-if="store.isChineseBank" class="word-block">
-          <p class="word-pinyin">{{ store.currentWordZh }}</p>
-        </div>
-        <!-- 英语词库：显示单词 + 中文释义 -->
-        <div v-else class="word-block">
-          <p class="word-en">{{ store.currentWord }}</p>
-          <p v-if="store.currentWordZh" class="word-zh">{{ store.currentWordZh }}</p>
-        </div>
-      </template>
-      <p v-else class="celebrate">🎉 全部完成！</p>
+    <!-- 模式选择器 -->
+    <div v-if="!store.isFinished" class="mode-selector">
+      <button
+        class="mode-btn"
+        :class="{ active: store.dictationMode === 'display' }"
+        @click="store.setDictationMode('display')"
+      >
+        👁 屏幕显示
+      </button>
+      <button
+        class="mode-btn"
+        :class="{ active: store.dictationMode === 'listening' }"
+        @click="store.setDictationMode('listening')"
+      >
+        👂 纯听力
+      </button>
     </div>
 
-    <!-- 状态提示 -->
-    <p v-if="store.statusMsg" class="status">{{ store.statusMsg }}</p>
+    <!-- ============ 本轮完成：结果展示 ============ -->
+    <div v-if="store.isFinished" class="session-result">
+      <h3 class="result-title">🎉 听写完成！</h3>
+      <div class="result-stats">
+        <div class="stat-item">
+          <span class="stat-num">{{ store.sessionResults.length }}</span>
+          <span class="stat-label">总计</span>
+        </div>
+        <div class="stat-item correct">
+          <span class="stat-num">{{ store.sessionResults.filter(r => r.correct).length }}</span>
+          <span class="stat-label">正确</span>
+        </div>
+        <div class="stat-item wrong">
+          <span class="stat-num">{{ store.sessionWrongWords.length }}</span>
+          <span class="stat-label">错误</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-num">{{ store.sessionAccuracy }}%</span>
+          <span class="stat-label">正确率</span>
+        </div>
+      </div>
 
-    <!-- 输入框（听写模式） -->
-    <div v-if="!store.isFinished" class="input-area">
-      <input
-        v-model="store.inputText"
-        type="text"
-        class="word-input"
-        :placeholder="store.isChineseBank ? '输入汉字...' : '输入单词拼写...'"
-        :disabled="store.isPlaying || store.isSubmitted"
-        @keyup.enter="handleSubmit"
-      />
-      <div class="input-buttons">
-        <button
-          v-if="!store.isSubmitted"
-          class="btn btn-primary"
-          :disabled="!store.inputText.trim() || store.isPlaying"
-          @click="handleSubmit"
-        >
-          ✅ 确认
-        </button>
-        <button
-          v-if="store.isSubmitted && store.isCorrect"
-          class="btn btn-success"
-          @click="handleNext"
-        >
-          ➡️ 下一词
-        </button>
-        <button
-          v-if="store.isSubmitted && !store.isCorrect"
-          class="btn btn-next"
-          @click="skipWord"
-        >
-          ⏭ 跳过
-        </button>
-        <button
-          class="btn btn-secondary"
-          :disabled="store.isPlaying"
-          @click="speakCurrent"
-        >
-          🔊 重读
-        </button>
-        <button
-          v-if="!store.isFinished"
-          class="btn btn-secondary"
-          @click="skipWord"
-        >
-          ⏭ 跳过
-        </button>
+      <!-- 错词列表 -->
+      <div v-if="store.sessionWrongWords.length > 0" class="result-wrong">
+        <p class="wrong-title">❌ 错误词汇</p>
+        <div class="wrong-list">
+          <div v-for="(item, i) in store.sessionWrongWords" :key="i" class="wrong-item">
+            <div class="wrong-word-block">
+              <span class="wrong-word">{{ item.word }}</span>
+              <span v-if="item.wordZh" class="wrong-zh">{{ item.wordZh }}</span>
+            </div>
+            <span class="wrong-answer">你写: {{ item.yourAnswer || '(空)' }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="result-actions">
+        <button class="btn btn-primary" @click="restartDictation">🔄 再来一轮</button>
       </div>
     </div>
 
-    <!-- 答题反馈 -->
-    <div v-if="store.isSubmitted" class="feedback" :class="{ correct: store.isCorrect, wrong: !store.isCorrect }">
-      <template v-if="store.isCorrect">
-        ✅ 正确！{{ store.currentWordZh ? '(' + store.currentWordZh + ')' : '' }}
-      </template>
-      <template v-else>
-        ❌ 错误，正确答案：<strong>{{ store.currentWord }}</strong>
-        <span v-if="store.currentWordZh">（{{ store.currentWordZh }}）</span>
-      </template>
-    </div>
+    <!-- ============ 听写进行中 ============ -->
+    <template v-else>
+      <!-- 单词展示区 -->
+      <div class="word-display">
+        <!-- ---- 屏幕显示模式 ---- -->
+        <template v-if="store.dictationMode === 'display'">
+          <!-- 语文词库：只显示拼音 -->
+          <div v-if="store.isChineseBank" class="word-block">
+            <p class="word-pinyin">{{ store.currentWordZh }}</p>
+          </div>
+          <!-- 英语词库：显示单词 + 中文释义 -->
+          <div v-else class="word-block">
+            <p class="word-en">{{ store.currentWord }}</p>
+            <p v-if="store.currentWordZh" class="word-zh">{{ store.currentWordZh }}</p>
+          </div>
+        </template>
+
+        <!-- ---- 纯听力模式：不显示任何文字 ---- -->
+        <template v-else>
+          <div class="listening-icon">
+            <span class="big-icon">🔊</span>
+            <p class="listening-hint">请听音频，写出单词</p>
+          </div>
+        </template>
+      </div>
+
+      <!-- 状态提示 -->
+      <p v-if="store.statusMsg" class="status">{{ store.statusMsg }}</p>
+
+      <!-- 输入框 -->
+      <div class="input-area">
+        <input
+          v-model="store.inputText"
+          type="text"
+          class="word-input"
+          :placeholder="store.isChineseBank ? '输入汉字...' : '输入单词拼写...'"
+          :disabled="store.isPlaying || (store.isSubmitted && store.dictationMode === 'display')"
+          @keyup.enter="handleSubmit"
+        />
+        <div class="input-buttons">
+          <!-- 确认按钮 -->
+          <button
+            v-if="!store.isSubmitted"
+            class="btn btn-primary"
+            :disabled="!store.inputText.trim() || store.isPlaying"
+            @click="handleSubmit"
+          >
+            ✅ 确认
+          </button>
+
+          <!-- 屏幕显示模式：答对后显示"下一词" -->
+          <button
+            v-if="store.dictationMode === 'display' && store.isSubmitted && store.isCorrect"
+            class="btn btn-success"
+            @click="handleNext"
+          >
+            ➡️ 下一词
+          </button>
+
+          <!-- 屏幕显示模式：答错后显示"跳过" -->
+          <button
+            v-if="store.dictationMode === 'display' && store.isSubmitted && !store.isCorrect"
+            class="btn btn-next"
+            @click="skipWord"
+          >
+            ⏭ 跳过
+          </button>
+
+          <!-- 纯听力模式：提交后显示"下一个" -->
+          <button
+            v-if="store.dictationMode === 'listening' && store.isSubmitted"
+            class="btn btn-success"
+            @click="handleListeningNext"
+          >
+            ➡️ 下一个
+          </button>
+
+          <!-- 重读按钮 -->
+          <button
+            class="btn btn-secondary"
+            :disabled="store.isPlaying"
+            @click="speakCurrent"
+          >
+            🔊 重读
+          </button>
+
+          <!-- 屏幕显示模式：未提交时可跳过 -->
+          <button
+            v-if="store.dictationMode === 'display' && !store.isSubmitted"
+            class="btn btn-secondary"
+            @click="skipWord"
+          >
+            ⏭ 跳过
+          </button>
+        </div>
+      </div>
+
+      <!-- 屏幕显示模式：答题反馈 -->
+      <div
+        v-if="store.dictationMode === 'display' && store.isSubmitted"
+        class="feedback"
+        :class="{ correct: store.isCorrect, wrong: !store.isCorrect }"
+      >
+        <template v-if="store.isCorrect">
+          ✅ 正确！{{ store.currentWordZh ? '(' + store.currentWordZh + ')' : '' }}
+        </template>
+        <template v-else>
+          ❌ 错误，正确答案：<strong>{{ store.currentWord }}</strong>
+          <span v-if="store.currentWordZh">（{{ store.currentWordZh }}）</span>
+        </template>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -368,8 +377,37 @@ function skipWord() {
   width: 100%;
 }
 
+/* 模式选择器 */
+.mode-selector {
+  display: flex;
+  gap: 8px;
+  background: var(--bg-card, #fff);
+  border-radius: 12px;
+  padding: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.mode-btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted, #94a3b8);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-btn.active {
+  background: #3b82f6;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+/* 单词展示 */
 .word-display {
-  min-height: 80px;
+  min-height: 100px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -406,20 +444,27 @@ function skipWord() {
   margin: 0;
 }
 
-.word-hidden {
-  font-size: 52px;
-  font-weight: 800;
-  color: var(--text-muted, #94a3b8);
-  text-align: center;
-  margin: 0;
-  letter-spacing: 8px;
+/* 纯听力模式图标 */
+.listening-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
 }
 
-.celebrate {
-  font-size: 36px;
-  font-weight: 700;
-  color: #10b981;
-  text-align: center;
+.big-icon {
+  font-size: 64px;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.1); opacity: 1; }
+}
+
+.listening-hint {
+  font-size: 16px;
+  color: var(--text-muted, #94a3b8);
   margin: 0;
 }
 
@@ -429,6 +474,7 @@ function skipWord() {
   margin: 0;
 }
 
+/* 输入区 */
 .input-area {
   width: 100%;
   display: flex;
@@ -514,6 +560,7 @@ function skipWord() {
   color: var(--text-secondary, #475569);
 }
 
+/* 答题反馈 */
 .feedback {
   padding: 12px 24px;
   border-radius: 12px;
@@ -534,5 +581,114 @@ function skipWord() {
 
 .feedback strong {
   font-size: 22px;
+}
+
+/* 本轮结果 */
+.session-result {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.result-title {
+  font-size: 28px;
+  font-weight: 800;
+  color: #10b981;
+  margin: 0;
+}
+
+.result-stats {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+  justify-content: center;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 20px;
+  background: var(--bg-card, #fff);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  min-width: 72px;
+}
+
+.stat-item.correct .stat-num { color: #10b981; }
+.stat-item.wrong .stat-num { color: #ef4444; }
+
+.stat-num {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--text-primary, #1e293b);
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.result-wrong {
+  width: 100%;
+  padding: 16px;
+  background: var(--bg-card, #fff);
+  border-radius: 16px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.wrong-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ef4444;
+  margin: 0 0 12px;
+}
+
+.wrong-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.wrong-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #fef2f2;
+  border-radius: 8px;
+}
+
+.wrong-word-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wrong-word {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary, #1e293b);
+}
+
+.wrong-zh {
+  font-size: 13px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.wrong-answer {
+  font-size: 13px;
+  color: var(--text-muted, #94a3b8);
+  text-align: right;
+}
+
+.result-actions {
+  display: flex;
+  gap: 12px;
 }
 </style>

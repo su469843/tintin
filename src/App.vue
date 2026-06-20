@@ -1,28 +1,31 @@
 <script setup>
 /**
  * App.vue - 听写应用根组件（编排器）
- * 负责整体布局、主题、手势控制、词库初始化
+ * 负责整体布局、主题、手势控制、词库初始化、认证守卫、DB 数据加载
  */
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useDictationStore } from './stores/dictationStore'
+import { useAuthStore } from './stores/authStore'
 import { useStorage } from './composables/useStorage'
 import DictationPlayer from './components/DictationPlayer.vue'
 import WordBankManager from './components/WordBankManager.vue'
 import ProgressDashboard from './components/ProgressDashboard.vue'
+import WrongWordsReview from './components/WrongWordsReview.vue'
+import AuthView from './components/AuthView.vue'
 
 const store = useDictationStore()
+const authStore = useAuthStore()
 const { STORAGE_KEYS, load, save } = useStorage()
 
-/** 取消订阅 Pinia store 变化（onUnmounted 时清理） */
 let unsubscribeStore = null
 
 // ============================================================
-// 📱 标签页导航
+// 标签页导航（4个标签）
 // ============================================================
 const activeTab = ref('dictation')
 
 // ============================================================
-// ☀️ 暗色模式
+// 暗色模式
 // ============================================================
 const isDark = ref(false)
 
@@ -32,10 +35,12 @@ function updateDarkMode() {
 }
 
 // ============================================================
-// 🖱️ 手势控制（左右滑动切换单词/标签）
+// 手势控制（左右滑动切换标签页）
 // ============================================================
 let touchStartX = 0
 let touchStartY = 0
+
+const tabOrder = ['bank', 'dictation', 'review', 'progress']
 
 function onTouchStart(e) {
   touchStartX = e.touches[0].clientX
@@ -48,50 +53,113 @@ function onTouchEnd(e) {
   const diffX = endX - touchStartX
   const diffY = endY - touchStartY
 
-  // 忽略垂直滑动
   if (Math.abs(diffY) > Math.abs(diffX)) return
-  // 最小滑动距离 80px
   if (Math.abs(diffX) < 80) return
 
-  if (diffX < 0) {
-    // 左滑 → 进度看板
-    activeTab.value = 'progress'
-  } else {
-    // 右滑 → 词库管理
-    activeTab.value = 'bank'
+  const currentIdx = tabOrder.indexOf(activeTab.value)
+  if (diffX < 0 && currentIdx < tabOrder.length - 1) {
+    activeTab.value = tabOrder[currentIdx + 1]
+  } else if (diffX > 0 && currentIdx > 0) {
+    activeTab.value = tabOrder[currentIdx - 1]
   }
 }
 
 // ============================================================
-// 🚀 初始化
+// 数据迁移：将 localStorage 旧数据迁移到 DB
+// ============================================================
+async function migrateLocalStorageToDB() {
+  const MIGRATION_KEY = 'dictation_db_migrated'
+  if (localStorage.getItem(MIGRATION_KEY)) return
+
+  // 迁移错词
+  const savedWrongWords = load(STORAGE_KEYS.WRONG_WORDS, [])
+  if (savedWrongWords.length > 0) {
+    console.log(`[迁移] 将 ${savedWrongWords.length} 条错词迁移到数据库...`)
+    for (const item of savedWrongWords) {
+      try {
+        await fetch('/api/wrong-words', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            word: item.word,
+            wordZh: item.wordZh || null,
+            yourAnswer: item.yourAnswer || null,
+            bankName: null,
+          }),
+        })
+      } catch {
+        // 忽略单条失败
+      }
+    }
+  }
+
+  // 迁移统计
+  const savedStats = load(STORAGE_KEYS.DAILY_STATS, {})
+  const statEntries = Object.entries(savedStats)
+  if (statEntries.length > 0) {
+    console.log(`[迁移] 将 ${statEntries.length} 天统计迁移到数据库...`)
+    for (const [date, data] of statEntries) {
+      try {
+        await fetch('/api/stats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            date,
+            total: data.total || 0,
+            correct: data.correct || 0,
+            wrong: data.wrong || 0,
+          }),
+        })
+      } catch {
+        // 忽略单条失败
+      }
+    }
+  }
+
+  // 标记迁移完成
+  localStorage.setItem(MIGRATION_KEY, '1')
+  // 清除旧数据
+  localStorage.removeItem(STORAGE_KEYS.WRONG_WORDS)
+  localStorage.removeItem(STORAGE_KEYS.DAILY_STATS)
+  console.log('[迁移] localStorage 旧数据已清除')
+}
+
+// ============================================================
+// 初始化
 // ============================================================
 onMounted(async () => {
-  // 监听暗色模式变化
   updateDarkMode()
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateDarkMode)
 
-  // 从 localStorage 恢复持久化状态
-  const savedWrongWords = load(STORAGE_KEYS.WRONG_WORDS, [])
-  const savedDailyStats = load(STORAGE_KEYS.DAILY_STATS, {})
-  savedWrongWords.forEach(item => store.wrongWords.push(item))
-  Object.assign(store.dailyStats, savedDailyStats)
+  // 1. 检查认证状态
+  await authStore.init()
 
-  // 监听状态变化，自动保存到 localStorage
-  unsubscribeStore = store.$subscribe((mutation, state) => {
-    save(STORAGE_KEYS.WRONG_WORDS, state.wrongWords)
-    save(STORAGE_KEYS.DAILY_STATS, state.dailyStats)
-  })
+  // 如果未登录，等待用户登录（AuthView 会显示）
+  if (!authStore.isLoggedIn) return
 
-  // 从 /words.json 加载内置词库
+  // 已登录，加载数据
+  await loadAppData()
+})
+
+/** 登录后加载应用数据 */
+async function loadAppData() {
+  // 1. 迁移旧数据到 DB
+  await migrateLocalStorageToDB()
+
+  // 2. 从数据库加载错词和统计
+  await Promise.all([
+    store.fetchWrongWords(),
+    store.fetchStats(),
+  ])
+
+  // 3. 加载词库
   async function loadWordBank(url) {
     try {
       const resp = await fetch(url)
       const data = await resp.json()
-
       Object.entries(data).forEach(([name, words]) => {
         store.importBank(name, words)
       })
-
       return Object.keys(data)[0]
     } catch (err) {
       console.error(`词库加载失败 (${url}):`, err)
@@ -99,16 +167,14 @@ onMounted(async () => {
     }
   }
 
-  // 加载通用词库 + 英语六年级 + 语文六年级词库
   const firstBank = await loadWordBank('/words.json')
   await loadWordBank('/words-g6.json')
   await loadWordBank('/words-g6-chinese.json')
 
-  // 默认加载第一个词库
   if (firstBank) {
     store.loadWordBank(firstBank, store.customBanks[firstBank])
   }
-})
+}
 
 onUnmounted(() => {
   if (unsubscribeStore) {
@@ -116,15 +182,31 @@ onUnmounted(() => {
     unsubscribeStore = null
   }
 })
+
+/** 错词复习组件请求切换到听写标签 */
+function switchToDictation() {
+  activeTab.value = 'dictation'
+}
 </script>
 
 <template>
+  <!-- 未登录：显示登录/注册界面 -->
+  <AuthView v-if="!authStore.isInitialized || !authStore.isLoggedIn" />
+
+  <!-- 已登录：主应用 -->
   <div
+    v-else
     class="app"
     :class="{ dark: isDark }"
     @touchstart.passive="onTouchStart"
     @touchend.passive="onTouchEnd"
   >
+    <!-- 顶部用户栏 -->
+    <div class="user-bar">
+      <span class="user-info">👤 {{ authStore.user?.name || authStore.user?.email }}</span>
+      <button class="btn-logout" @click="authStore.signOut()">退出</button>
+    </div>
+
     <!-- 标签栏 -->
     <nav class="tab-bar">
       <button
@@ -133,6 +215,13 @@ onUnmounted(() => {
         @click="activeTab = 'dictation'"
       >
         🔊 听写
+      </button>
+      <button
+        class="tab"
+        :class="{ active: activeTab === 'review' }"
+        @click="activeTab = 'review'"
+      >
+        📝 错词
       </button>
       <button
         class="tab"
@@ -153,6 +242,7 @@ onUnmounted(() => {
     <!-- 内容区 -->
     <main class="content">
       <DictationPlayer v-if="activeTab === 'dictation'" />
+      <WrongWordsReview v-else-if="activeTab === 'review'" @switch-to-dictation="switchToDictation" />
       <WordBankManager v-else-if="activeTab === 'bank'" />
       <ProgressDashboard v-else-if="activeTab === 'progress'" />
     </main>
@@ -160,9 +250,6 @@ onUnmounted(() => {
 </template>
 
 <style>
-/* ============================================================
-   🌍 全局 CSS 变量（亮色/暗色）
-   ============================================================ */
 :root,
 [data-theme='light'] {
   --bg-primary: #f0f4f8;
@@ -186,7 +273,6 @@ onUnmounted(() => {
   --border-color: #334155;
 }
 
-/* 全局样式 */
 * {
   margin: 0;
   padding: 0;
@@ -207,6 +293,39 @@ body {
 </style>
 
 <style scoped>
+.user-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 520px;
+  margin-bottom: 12px;
+  padding: 0 4px;
+}
+
+.user-info {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.btn-logout {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-logout:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
 .app {
   min-height: 100dvh;
   display: flex;
@@ -216,16 +335,15 @@ body {
   transition: background-color 0.3s;
 }
 
-/* 标签栏 */
 .tab-bar {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
   max-width: 520px;
   margin-bottom: 20px;
   background: var(--bg-card);
   border-radius: 16px;
-  padding: 6px;
+  padding: 5px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 }
 
@@ -236,10 +354,11 @@ body {
   border-radius: 12px;
   background: transparent;
   color: var(--text-muted);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+  white-space: nowrap;
 }
 
 .tab.active {
@@ -252,7 +371,6 @@ body {
   background: var(--bg-secondary);
 }
 
-/* 内容区 */
 .content {
   width: 100%;
   max-width: 520px;

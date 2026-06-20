@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 import ttsProxyPlugin from './vite-plugins/ttsProxy.js'
+import dbApiPlugin from './vite-plugins/dbApi.js'
 
 export default defineConfig(({ mode }) => {
   // 加载 .env 文件到 process.env，供后端插件使用
@@ -12,6 +13,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       vue(),
       ttsProxyPlugin(),
+      dbApiPlugin(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icons/*.svg'],

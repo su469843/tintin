@@ -1,99 +1,222 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { useAuthStore } from './authStore'
 
 /**
  * 听写应用核心状态管理
- * 使用 Pinia composition API 风格（setup store）
+ * Pinia composition API 风格（setup store）
+ *
+ * 数据策略：
+ * - 听写状态：纯内存
+ * - 错词本/统计：PostgreSQL 为主，localStorage 为离线缓存
  */
 export const useDictationStore = defineStore('dictation', () => {
   // ============================================================
-  // 📚 词库状态
+  // 词库状态
   // ============================================================
-  /** 当前词库名称 */
   const currentBank = ref('四级词汇')
-  /** 所有可用词库名称列表 */
   const bankNames = ref([])
-  /** 当前词库的全部单词 */
   const wordList = ref([])
-  /** 用户自定义词库（key=词库名, value=单词数组） */
   const customBanks = ref({})
 
   // ============================================================
-  // ▶️ 听写状态
+  // 听写状态
   // ============================================================
   const currentIndex = ref(0)
   const isPlaying = ref(false)
   const isFinished = ref(false)
   const statusMsg = ref('')
 
-  /** 用户输入的内容 */
   const inputText = ref('')
-  /** 是否已提交答案 */
   const isSubmitted = ref(false)
-  /** 当前单词回答是否正确 */
   const isCorrect = ref(null)
 
   // ============================================================
-  // ❌ 错词本
+  // 听写模式: 'display' (屏幕显示) | 'listening' (纯听力)
   // ============================================================
-  /** 错词列表 { word, wordZh, yourAnswer, timestamp } */
-  const wrongWords = ref([])
+  const dictationMode = ref('display')
 
   // ============================================================
-  // 📊 统计
+  // 本轮听写结果（用于结束后统一展示）
   // ============================================================
-  /** 每日统计 { 'YYYY-MM-DD': { total, correct, wrong } } */
+  /** { word, wordZh, yourAnswer, correct }[] */
+  const sessionResults = ref([])
+
+  // ============================================================
+  // 错词本
+  // ============================================================
+  /** 从数据库加载的错词列表 */
+  const wrongWords = ref([])
+  /** 是否处于错词复习模式 */
+  const isReviewMode = ref(false)
+
+  // ============================================================
+  // 统计
+  // ============================================================
   const dailyStats = ref({})
-  /** 今日已学单词数 */
   const learnedCount = ref(0)
 
   // ============================================================
-  // ⚙️ 设置
+  // 设置
   // ============================================================
-  /** 播放模式：read-only / normal / blind / chinese */
   const playMode = ref('normal')
-  /** 是否开启自动下一词 */
   const autoNext = ref(true)
 
   // ============================================================
-  // 📐 计算属性
+  // 加载状态
+  // ============================================================
+  const isLoading = ref(false)
+
+  // ============================================================
+  // 计算属性
   // ============================================================
   const total = computed(() => wordList.value.length)
 
-  /** 获取单词的朗读/对比文本（兼容全部格式） */
   function getWordEn(w) {
     if (typeof w !== 'object' || w === null) return w ?? ''
-    if (w.word) return w.word      // { word, pinyin } 格式（语文）
-    if (w.en) return w.en          // { en, zh } 格式（英语）
-    return ''
-  }
-  /** 获取单词的释义/拼音（兼容全部格式） */
-  function getWordZh(w) {
-    if (typeof w !== 'object' || w === null) return ''
-    if (w.pinyin) return w.pinyin  // { word, pinyin } 格式 → 显示拼音
-    if (w.zh) return w.zh          // { en, zh } 格式 → 显示中文释义
+    if (w.word) return w.word
+    if (w.en) return w.en
     return ''
   }
 
-  /** 当前的朗读/对比文本（兼容全部格式） */
+  function getWordZh(w) {
+    if (typeof w !== 'object' || w === null) return ''
+    if (w.pinyin) return w.pinyin
+    if (w.zh) return w.zh
+    return ''
+  }
+
   const currentWord = computed(() => getWordEn(wordList.value[currentIndex.value]))
-  /** 当前单词的辅助显示文本（英语=中文释义，语文=拼音） */
   const currentWordZh = computed(() => getWordZh(wordList.value[currentIndex.value]))
-  /** 当前词库是否为语文（中文）词库 */
+
   const isChineseBank = computed(() => {
     const w = wordList.value[currentIndex.value]
     const text = getWordEn(w)
     return /[\u4e00-\u9fa5]/.test(text)
   })
+
   const progressText = computed(() => `第 ${currentIndex.value + 1} / ${total.value} 个`)
   const today = computed(() => new Date().toISOString().slice(0, 10))
   const todayStats = computed(() => dailyStats.value[today.value] ?? { total: 0, correct: 0, wrong: 0 })
 
+  /** 本轮正确率 */
+  const sessionAccuracy = computed(() => {
+    if (sessionResults.value.length === 0) return 0
+    const correct = sessionResults.value.filter(r => r.correct).length
+    return Math.round((correct / sessionResults.value.length) * 100)
+  })
+
+  /** 本轮错词 */
+  const sessionWrongWords = computed(() =>
+    sessionResults.value.filter(r => !r.correct)
+  )
+
   // ============================================================
-  // 🎯 动作
+  // API 封装
   // ============================================================
 
-  /** 加载词库数据（从外部 JSON 或自定义词库） */
+  /** 获取当前用户 ID */
+  function getUserId() {
+    const authStore = useAuthStore()
+    return authStore.userId
+  }
+
+  /** 提交错词到数据库 */
+  async function syncWrongWordToDB(word, wordZh, yourAnswer) {
+    const userId = getUserId()
+    if (!userId) return
+    try {
+      await fetch('/api/wrong-words', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          word,
+          wordZh: wordZh || null,
+          yourAnswer: yourAnswer || null,
+          bankName: currentBank.value,
+        }),
+      })
+    } catch (err) {
+      console.warn('[Store] 同步错词失败:', err.message)
+    }
+  }
+
+  /** 同步当日统计到数据库 */
+  async function syncStatsToDB(date, total, correct, wrong) {
+    const userId = getUserId()
+    if (!userId) return
+    try {
+      await fetch('/api/stats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, date, total, correct, wrong }),
+      })
+    } catch (err) {
+      console.warn('[Store] 同步统计失败:', err.message)
+    }
+  }
+
+  /** 从数据库加载错词列表 */
+  async function fetchWrongWords() {
+    const userId = getUserId()
+    if (!userId) return
+    isLoading.value = true
+    try {
+      const resp = await fetch(`/api/wrong-words?userId=${encodeURIComponent(userId)}&limit=500`)
+      const json = await resp.json()
+      if (json.data) {
+        wrongWords.value = json.data.map(row => ({
+          id: row.id,
+          word: row.word,
+          wordZh: row.word_zh || '',
+          yourAnswer: row.your_answer || '',
+          bankName: row.bank_name || '',
+          timestamp: new Date(row.created_at).getTime(),
+        }))
+      }
+    } catch (err) {
+      console.warn('[Store] 加载错词失败:', err.message)
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  /** 从数据库加载统计数据 */
+  async function fetchStats() {
+    const userId = getUserId()
+    if (!userId) return
+    try {
+      const resp = await fetch(`/api/stats?userId=${encodeURIComponent(userId)}`)
+      const json = await resp.json()
+      if (json.data) {
+        dailyStats.value = json.data
+      }
+    } catch (err) {
+      console.warn('[Store] 加载统计失败:', err.message)
+    }
+  }
+
+  /** 删除指定错词 */
+  async function deleteWrongWord(id) {
+    const userId = getUserId()
+    if (!userId) return
+    try {
+      await fetch('/api/wrong-words', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, ids: [id] }),
+      })
+      wrongWords.value = wrongWords.value.filter(w => w.id !== id)
+    } catch (err) {
+      console.warn('[Store] 删除错词失败:', err.message)
+    }
+  }
+
+  // ============================================================
+  // 动作
+  // ============================================================
+
   function loadWordBank(name, words) {
     currentBank.value = name
     wordList.value = [...words]
@@ -103,41 +226,48 @@ export const useDictationStore = defineStore('dictation', () => {
     isCorrect.value = null
     inputText.value = ''
     statusMsg.value = ''
+    sessionResults.value = []
+    isReviewMode.value = false
   }
 
-  /** 提交输入答案，对比对错 */
+  /** 提交输入答案 */
   function submitAnswer() {
     if (isSubmitted.value) return
     isSubmitted.value = true
 
     const userAnswer = inputText.value.trim().toLowerCase()
     const correctAnswer = currentWord.value.toLowerCase()
+    const correct = userAnswer === correctAnswer
+    isCorrect.value = correct
 
-    if (userAnswer === correctAnswer) {
-      isCorrect.value = true
-    } else {
-      isCorrect.value = false
-      const raw = wordList.value[currentIndex.value]
-      wrongWords.value.push({
-        word: currentWord.value,
-        wordZh: getWordZh(raw),
-        yourAnswer: inputText.value.trim(),
-        timestamp: Date.now()
-      })
+    // 记录本轮结果
+    sessionResults.value.push({
+      word: currentWord.value,
+      wordZh: currentWordZh.value,
+      yourAnswer: inputText.value.trim(),
+      correct,
+    })
+
+    if (!correct) {
+      // 同步到数据库
+      syncWrongWordToDB(currentWord.value, currentWordZh.value, inputText.value.trim())
     }
 
-    // 更新今日统计
+    // 更新本地统计
     const d = today.value
     if (!dailyStats.value[d]) {
       dailyStats.value[d] = { total: 0, correct: 0, wrong: 0 }
     }
     dailyStats.value[d].total++
-    if (isCorrect.value) {
+    if (correct) {
       dailyStats.value[d].correct++
     } else {
       dailyStats.value[d].wrong++
     }
     learnedCount.value++
+
+    // 同步统计到数据库
+    syncStatsToDB(d, 1, correct ? 1 : 0, correct ? 0 : 1)
   }
 
   /** 前进到下一个单词 */
@@ -153,17 +283,9 @@ export const useDictationStore = defineStore('dictation', () => {
     }
   }
 
-  /** 设置播放状态 */
-  function setPlaying(val) {
-    isPlaying.value = val
-  }
+  function setPlaying(val) { isPlaying.value = val }
+  function setStatus(msg) { statusMsg.value = msg }
 
-  /** 设置状态消息 */
-  function setStatus(msg) {
-    statusMsg.value = msg
-  }
-
-  /** 重播当前单词 */
   function resetCurrent() {
     isSubmitted.value = false
     isCorrect.value = null
@@ -171,7 +293,6 @@ export const useDictationStore = defineStore('dictation', () => {
     statusMsg.value = ''
   }
 
-  /** 重置全部 */
   function resetAll() {
     currentIndex.value = 0
     isFinished.value = false
@@ -180,12 +301,71 @@ export const useDictationStore = defineStore('dictation', () => {
     inputText.value = ''
     statusMsg.value = ''
     isPlaying.value = false
-    statusMsg.value = ''
+    sessionResults.value = []
+    isReviewMode.value = false
+  }
+
+  /** 设置听写模式 */
+  function setDictationMode(mode) {
+    dictationMode.value = mode
   }
 
   /** 清空错词本 */
-  function clearWrongWords() {
-    wrongWords.value = []
+  async function clearWrongWords() {
+    const userId = getUserId()
+    if (!userId) return
+    try {
+      await fetch('/api/wrong-words', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      })
+      wrongWords.value = []
+    } catch (err) {
+      console.warn('[Store] 清空错词失败:', err.message)
+    }
+  }
+
+  /** 开始错词复习：从数据库获取打乱的错词，加载为新词库 */
+  async function startWrongWordReview() {
+    const userId = getUserId()
+    if (!userId) return false
+    isLoading.value = true
+    try {
+      const resp = await fetch(`/api/wrong-words/review?userId=${encodeURIComponent(userId)}`)
+      const json = await resp.json()
+
+      if (!json.data || json.data.length === 0) {
+        statusMsg.value = '暂无错词，无需复习'
+        isLoading.value = false
+        return false
+      }
+
+      // 将错词转为词库格式
+      const reviewWords = json.data.map(row => ({
+        en: row.word,
+        zh: row.word_zh || '',
+        _reviewId: row.id, // 保留 ID 用于复习正确后删除
+      }))
+
+      currentBank.value = '错词复习'
+      wordList.value = reviewWords
+      currentIndex.value = 0
+      isFinished.value = false
+      isSubmitted.value = false
+      isCorrect.value = null
+      inputText.value = ''
+      statusMsg.value = ''
+      sessionResults.value = []
+      isReviewMode.value = true
+
+      isLoading.value = false
+      return true
+    } catch (err) {
+      console.warn('[Store] 加载错词复习失败:', err.message)
+      isLoading.value = false
+      return false
+    }
   }
 
   /** 切换词库 */
@@ -207,15 +387,22 @@ export const useDictationStore = defineStore('dictation', () => {
     currentBank, bankNames, wordList, customBanks,
     currentIndex, isPlaying, isFinished, statusMsg,
     inputText, isSubmitted, isCorrect,
+    dictationMode, sessionResults, isReviewMode,
     wrongWords, dailyStats, learnedCount,
-    playMode, autoNext,
+    playMode, autoNext, isLoading,
     // 计算属性
-    total, currentWord, currentWordZh, isChineseBank, progressText, today, todayStats,
+    total, currentWord, currentWordZh, isChineseBank,
+    progressText, today, todayStats,
+    sessionAccuracy, sessionWrongWords,
     // 工具函数
     getWordEn, getWordZh,
     // 动作
     loadWordBank, submitAnswer, nextWord,
     setPlaying, setStatus, resetCurrent, resetAll,
-    clearWrongWords, switchBank, importBank
+    setDictationMode, clearWrongWords, switchBank, importBank,
+    startWrongWordReview,
+    // DB 操作
+    fetchWrongWords, fetchStats, deleteWrongWord,
+    syncWrongWordToDB, syncStatsToDB,
   }
 })
