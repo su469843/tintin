@@ -223,6 +223,13 @@ function restartDictation() {
          纸笔模式：设置阶段
     ============================================================ -->
     <template v-if="store.dictationMode === 'paper' && store.paperPhase === 'setup'">
+      <!-- 模式切换 -->
+      <div class="mode-selector">
+        <button :class="{ active: store.dictationMode === 'display' }" @click="store.setDictationMode('display')">👁 屏幕</button>
+        <button :class="{ active: store.dictationMode === 'chinese_only' }" @click="store.setDictationMode('chinese_only')">📝 中文提示</button>
+        <button :class="{ active: store.dictationMode === 'listening' }" @click="store.setDictationMode('listening')">👂 纯听力</button>
+        <button :class="{ active: store.dictationMode === 'paper' }" @click="store.setDictationMode('paper')">📄 纸笔</button>
+      </div>
       <div class="paper-setup">
         <h3 class="setup-title">📄 纸笔听写设置</h3>
 
@@ -264,6 +271,12 @@ function restartDictation() {
          上面中文提示，下面播报 + 上/下一个
     ============================================================ -->
     <template v-else-if="store.dictationMode === 'paper' && store.paperPhase === 'playing'">
+      <div class="mode-selector">
+        <button :class="{ active: store.dictationMode === 'display' }" @click="store.setDictationMode('display')">👁 屏幕</button>
+        <button :class="{ active: store.dictationMode === 'chinese_only' }" @click="store.setDictationMode('chinese_only')">📝 中文提示</button>
+        <button :class="{ active: store.dictationMode === 'listening' }" @click="store.setDictationMode('listening')">👂 纯听力</button>
+        <button :class="{ active: store.dictationMode === 'paper' }" @click="store.setDictationMode('paper')">📄 纸笔</button>
+      </div>
       <div class="paper-playing">
         <!-- 进度 -->
         <p class="paper-progress">{{ store.currentIndex + 1 }} / {{ store.total }}</p>

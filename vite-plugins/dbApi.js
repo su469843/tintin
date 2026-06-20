@@ -354,6 +354,7 @@ async function handleInvitations(req, res, url) {
 async function handleWordBanks(req, res, url) {
   const sql = getDb()
   if (!sql) return sendJson(res, { error: 'DATABASE_URL 未配置' }, 500)
+  await ensureTables(sql)
 
   try {
     if (req.method === 'GET') {
@@ -406,11 +407,11 @@ async function handleWordBanks(req, res, url) {
         return sendJson(res, { error: '缺少 userId, name 或 lang' }, 400)
       }
       const bankResult = await sql.query(
-        `INSERT INTO user_word_banks (user_id, name, lang)
-         VALUES ($1, $2, $3)
+        `INSERT INTO user_word_banks (user_id, name, lang, is_public)
+         VALUES ($1, $2, $3, $4)
          ON CONFLICT (user_id, name) DO UPDATE SET updated_at = NOW()
          RETURNING id`,
-        [body.userId, body.name, body.lang]
+        [body.userId, body.name, body.lang, body.isPublic === true]
       )
       const bankId = bankResult[0]?.id
       if (body.words && Array.isArray(body.words) && body.words.length > 0) {
@@ -422,7 +423,7 @@ async function handleWordBanks(req, res, url) {
           )
         }
       }
-      return sendJson(res, { success: true, bankId, wordCount: body.words?.length || 0 }, 201)
+      return sendJson(res, { success: true, bankId, wordCount: body.words?.length || 0, isPublic: body.isPublic === true }, 201)
     }
 
     if (req.method === 'DELETE') {
