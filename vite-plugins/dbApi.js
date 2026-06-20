@@ -7,6 +7,61 @@
  */
 import { neon } from '@neondatabase/serverless'
 
+let tablesInitialized = false
+
+async function ensureTables(sql) {
+  if (tablesInitialized) return
+  tablesInitialized = true
+  console.log('[DB Plugin] 初始化数据库表...')
+  const stmts = [
+    `CREATE TABLE IF NOT EXISTS profiles (
+      id TEXT PRIMARY KEY, display_id TEXT UNIQUE NOT NULL,
+      name TEXT DEFAULT '', created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS invitations (
+      id SERIAL PRIMARY KEY, code TEXT NOT NULL UNIQUE,
+      created_by TEXT NOT NULL, used_by TEXT, used_by_email TEXT,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(), used_at TIMESTAMPTZ
+    )`,
+    `CREATE TABLE IF NOT EXISTS user_word_banks (
+      id SERIAL PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL,
+      lang TEXT NOT NULL DEFAULT 'en', is_public BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(user_id, name)
+    )`,
+    `CREATE TABLE IF NOT EXISTS user_words (
+      id SERIAL PRIMARY KEY, bank_id INT NOT NULL REFERENCES user_word_banks(id) ON DELETE CASCADE,
+      word TEXT NOT NULL, translation TEXT, sort_order INT DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS wrong_words (
+      id SERIAL PRIMARY KEY, user_id TEXT NOT NULL,
+      word TEXT NOT NULL, word_zh TEXT, your_answer TEXT,
+      bank_name TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS daily_stats (
+      id SERIAL PRIMARY KEY, user_id TEXT NOT NULL,
+      date DATE NOT NULL, total INT DEFAULT 0,
+      correct INT DEFAULT 0, wrong INT DEFAULT 0,
+      UNIQUE(user_id, date)
+    )`,
+  ]
+  for (const stmt of stmts) {
+    try { await sql.query(stmt) } catch (err) { console.warn('[DB Plugin] 建表警告:', err.message) }
+  }
+  // 迁移旧表：添加可能缺失的列
+  const migrations = [
+    `ALTER TABLE user_word_banks ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT false`,
+    `ALTER TABLE wrong_words ADD COLUMN IF NOT EXISTS user_id TEXT`,
+    `ALTER TABLE daily_stats ADD COLUMN IF NOT EXISTS user_id TEXT`,
+  ]
+  for (const stmt of migrations) {
+    try { await sql.query(stmt) } catch (err) { console.warn('[DB Plugin] 迁移警告:', err.message) }
+  }
+  console.log('[DB Plugin] 数据库表初始化完成')
+}
+
 function getDb() {
   const url = process.env.DATABASE_URL
   if (!url) {
@@ -396,6 +451,13 @@ async function handleProfiles(req, res, url) {
   if (!sql) return sendJson(res, { error: 'DATABASE_URL 未配置' }, 500)
 
   try {
+    // 自动建表
+    await sql.query(`CREATE TABLE IF NOT EXISTS profiles (
+      id TEXT PRIMARY KEY,
+      display_id TEXT UNIQUE NOT NULL,
+      name TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`)
     if (req.method === 'POST') {
       const body = await readBody(req)
       if (!body.userId) return sendJson(res, { error: '缺少 userId' }, 400)
