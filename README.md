@@ -54,17 +54,23 @@ npm run build
 
 | 变量名 | 必填 | 说明 |
 |--------|------|------|
-| `DATABASE_URL` | 是 | Neon PostgreSQL 连接字符串 |
+| `DATABASE_URL` | 是 | Neon PostgreSQL 连接字符串（从 Neon Dashboard 获取） |
+| `VITE_NEON_AUTH_URL` | 是 | Neon Auth URL（Neon Dashboard → Settings → Auth） |
 | `TTS_API_KEY` | 否 | TTS 代理 API 密钥（参见下方 TTS 配置） |
-| `BETTER_AUTH_URL` | 是 | 认证服务 URL（部署后设为 Vercel 域名） |
-| `BETTER_AUTH_SECRET` | 是 | 认证密钥（任意随机字符串） |
 
-### 数据库配置（Neon PostgreSQL）
+### 数据库与认证配置（Neon）
 
 1. 注册 [Neon](https://neon.tech)（免费）
-2. 创建项目，获取 `DATABASE_URL` 连接字符串
-3. 执行 `db/migrate.sql` 创建表结构
-4. 在 Vercel Dashboard → Settings → Environment Variables 中添加 `DATABASE_URL`
+2. 创建项目 → 在 Project Settings → Auth 中启用认证
+3. 复制 `DATABASE_URL` 和 `VITE_NEON_AUTH_URL` 到 `.env`
+4. 执行 `db/migrate.sql` 创建表结构（如需要）
+5. 在 Vercel Dashboard → Settings → Environment Variables 中添加以上变量
+
+> `VITE_NEON_AUTH_URL` 类似：
+> `https://ep-xxx.neonauth.c-9.us-east-1.aws.neon.tech/neondb/auth`
+>
+> `DATABASE_URL` 类似：
+> `postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require`
 
 ### TTS 服务配置
 
@@ -81,7 +87,7 @@ TTS 通过自建 Cloudflare Worker 代理调用，避免 CORS 限制。
 
 1. Fork 或 Push 代码到 GitHub
 2. 在 [Vercel](https://vercel.com) 导入仓库
-3. 添加环境变量（DATABASE_URL、BETTER_AUTH_URL、BETTER_AUTH_SECRET）
+3. 添加环境变量（DATABASE_URL、VITE_NEON_AUTH_URL、TTS_API_KEY）
 4. 部署，Vercel 会自动识别为 Vite 项目
 
 ## 使用说明
@@ -132,5 +138,5 @@ tintin/
 ```
 
 ## 许可证
+Apache 2.0
 
-MIT
