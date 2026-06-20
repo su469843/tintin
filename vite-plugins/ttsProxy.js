@@ -9,12 +9,14 @@ import http from 'node:http'
 
 /** TTS API 配置 */
 const TTS_API_URL = 'https://tts.519965.xyz/v1/audio/speech'
-const TTS_API_KEY = process.env.TTS_API_KEY || process.env.VITE_TTS_API_KEY || ''
+
+/** 惰性读取 API Key（.env 在模块加载时尚未注入 process.env，必须在请求时读取） */
+function getApiKey() {
+  return process.env.TTS_API_KEY || ''
+}
 
 /**
- * 向 TTS API 发送请求并返回音频 Blob
- * @param {object} body - 请求体 { model, input, voice, speed?, style? }
- * @returns {Promise<Buffer>} 音频数据
+ * 向 TTS API 发送请求并返回音频 Buffer
  */
 function fetchTTS(body) {
   return new Promise((resolve, reject) => {
@@ -23,20 +25,30 @@ function fetchTTS(body) {
     const isHttps = url.protocol === 'https:'
     const transport = isHttps ? https : http
 
+    const apiKey = getApiKey()
+    const headers = {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload),
+    }
+    if (apiKey) {
+      headers['Authorization'] = `Bearer ${apiKey}`
+    }
+
+    console.log('[TTS Proxy] 发送请求:', { method: 'POST', url: url.href, headers })
+
     const req = transport.request(
       {
         hostname: url.hostname,
         port: url.port || (isHttps ? 443 : 80),
         path: url.pathname,
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(payload),
-          ...(TTS_API_KEY ? { Authorization: `Bearer ${TTS_API_KEY}` } : {}),
-        },
+        headers,
         timeout: 15000,
       },
       (res) => {
+        console.log(`[TTS Proxy] 响应状态: ${res.statusCode} ${res.statusMessage}`)
+        console.log(`[TTS Proxy] 响应头:`, res.headers)
+
         if (res.statusCode !== 200) {
           let errBody = ''
           res.on('data', (chunk) => (errBody += chunk))

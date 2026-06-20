@@ -280,6 +280,11 @@ function skipWord() {
         <p v-if="store.playMode === 'blind' && !store.isSubmitted" class="word-hidden">
           ···
         </p>
+        <!-- 语文词库：只显示拼音，隐藏中文（中文是听写答案） -->
+        <div v-else-if="store.isChineseBank" class="word-block">
+          <p class="word-pinyin">{{ store.currentWordZh }}</p>
+        </div>
+        <!-- 英语词库：显示单词 + 中文释义 -->
         <div v-else class="word-block">
           <p class="word-en">{{ store.currentWord }}</p>
           <p v-if="store.currentWordZh" class="word-zh">{{ store.currentWordZh }}</p>
@@ -297,7 +302,7 @@ function skipWord() {
         v-model="store.inputText"
         type="text"
         class="word-input"
-        placeholder="输入单词拼写..."
+        :placeholder="store.isChineseBank ? '输入汉字...' : '输入单词拼写...'"
         :disabled="store.isPlaying || store.isSubmitted"
         @keyup.enter="handleSubmit"
       />
@@ -383,6 +388,14 @@ function skipWord() {
   font-weight: 800;
   color: var(--text-primary, #1e293b);
   letter-spacing: 2px;
+  margin: 0;
+}
+
+.word-pinyin {
+  font-size: 48px;
+  font-weight: 800;
+  color: var(--text-primary, #1e293b);
+  letter-spacing: 3px;
   margin: 0;
 }
 

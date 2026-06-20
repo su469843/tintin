@@ -75,10 +75,16 @@ export const useDictationStore = defineStore('dictation', () => {
     return ''
   }
 
-  /** 当前的英文单词（用于 TTS 朗读和输入对比） */
+  /** 当前的朗读/对比文本（兼容全部格式） */
   const currentWord = computed(() => getWordEn(wordList.value[currentIndex.value]))
-  /** 当前单词的中文释义（用于界面显示） */
+  /** 当前单词的辅助显示文本（英语=中文释义，语文=拼音） */
   const currentWordZh = computed(() => getWordZh(wordList.value[currentIndex.value]))
+  /** 当前词库是否为语文（中文）词库 */
+  const isChineseBank = computed(() => {
+    const w = wordList.value[currentIndex.value]
+    const text = getWordEn(w)
+    return /[\u4e00-\u9fa5]/.test(text)
+  })
   const progressText = computed(() => `第 ${currentIndex.value + 1} / ${total.value} 个`)
   const today = computed(() => new Date().toISOString().slice(0, 10))
   const todayStats = computed(() => dailyStats.value[today.value] ?? { total: 0, correct: 0, wrong: 0 })
@@ -204,7 +210,7 @@ export const useDictationStore = defineStore('dictation', () => {
     wrongWords, dailyStats, learnedCount,
     playMode, autoNext,
     // 计算属性
-    total, currentWord, currentWordZh, progressText, today, todayStats,
+    total, currentWord, currentWordZh, isChineseBank, progressText, today, todayStats,
     // 工具函数
     getWordEn, getWordZh,
     // 动作
