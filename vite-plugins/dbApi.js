@@ -201,28 +201,65 @@ async function handleInvitations(req, res, url) {
   try {
     if (req.method === 'GET') {
       const code = url.searchParams.get('code')
-      if (!code) return sendJson(res, { error: '缺少 code' }, 400)
-      const rows = await sql.query(
-        'SELECT * FROM invitations WHERE code = $1 AND is_active = true AND used_by IS NULL',
-        [code.toUpperCase()]
-      )
-      return rows.length > 0
-        ? sendJson(res, { valid: true })
-        : sendJson(res, { valid: false, message: '邀请码无效或已使用' })
+      const userId = url.searchParams.get('userId')
+
+      // 按 code 验证邀请码
+      if (code) {
+        const rows = await sql.query(
+          'SELECT * FROM invitations WHERE code = $1 AND is_active = true AND used_by IS NULL',
+          [code.toUpperCase()]
+        )
+        return rows.length > 0
+          ? sendJson(res, { valid: true })
+          : sendJson(res, { valid: false, message: '邀请码无效或已使用' })
+      }
+
+      // 按 userId 获取用户的邀请码信息
+      if (userId) {
+        const codes = await sql.query(
+          'SELECT * FROM invitations WHERE created_by = $1 ORDER BY created_at DESC LIMIT 1',
+          [userId]
+        )
+        const usedCount = await sql.query(
+          'SELECT COUNT(*) as count FROM invitations WHERE created_by = $1 AND used_by IS NOT NULL',
+          [userId]
+        )
+        const remaining = 3 - (usedCount[0]?.count || 0)
+
+        if (codes.length === 0) {
+          return sendJson(res, { hasCode: false, usedCount: usedCount[0]?.count || 0, remaining })
+        }
+        return sendJson(res, {
+          hasCode: true, code: codes[0].code, isActive: codes[0].is_active,
+          usedCount: usedCount[0]?.count || 0, remaining: Math.max(0, remaining),
+        })
+      }
+
+      return sendJson(res, { error: '缺少 code 或 userId' }, 400)
     }
 
     if (req.method === 'POST') {
       const body = await readBody(req)
       if (!body.userId) return sendJson(res, { error: '缺少 userId' }, 400)
+
+      // 检查是否已有邀请码
+      const existing = await sql.query(
+        'SELECT * FROM invitations WHERE created_by = $1 AND is_active = true ORDER BY created_at DESC LIMIT 1',
+        [body.userId]
+      )
+      if (existing.length > 0) {
+        return sendJson(res, { success: true, code: existing[0].code, reused: true })
+      }
+
       let code, attempts = 0
       do {
         code = generateCode()
-        const existing = await sql.query('SELECT id FROM invitations WHERE code = $1', [code])
-        if (existing.length === 0) break
+        const conflict = await sql.query('SELECT id FROM invitations WHERE code = $1', [code])
+        if (conflict.length === 0) break
         attempts++
       } while (attempts < 10)
       await sql.query('INSERT INTO invitations (code, created_by) VALUES ($1, $2)', [code, body.userId])
-      return sendJson(res, { success: true, code }, 201)
+      return sendJson(res, { success: true, code, reused: false }, 201)
     }
 
     if (req.method === 'PUT') {
@@ -233,6 +270,16 @@ async function handleInvitations(req, res, url) {
         [body.code.toUpperCase()]
       )
       if (rows.length === 0) return sendJson(res, { error: '邀请码无效或已使用' }, 400)
+
+      // 检查邀请上限
+      const usedCount = await sql.query(
+        'SELECT COUNT(*) as count FROM invitations WHERE created_by = $1 AND used_by IS NOT NULL',
+        [rows[0].created_by]
+      )
+      if ((usedCount[0]?.count || 0) >= 3) {
+        return sendJson(res, { error: '该邀请码已达到使用上限' }, 400)
+      }
+
       await sql.query(
         'UPDATE invitations SET used_by = $1, used_by_email = $2, used_at = NOW(), is_active = false WHERE code = $3',
         [body.userId, body.email || null, body.code.toUpperCase()]
@@ -256,12 +303,41 @@ async function handleWordBanks(req, res, url) {
   try {
     if (req.method === 'GET') {
       const userId = url.searchParams.get('userId')
+      const isPublic = url.searchParams.get('public')
+      const id = url.searchParams.get('id')
+
+      // 获取单个词库的单词
+      if (id) {
+        const words = await sql.query(
+          'SELECT * FROM user_words WHERE bank_id = $1 ORDER BY sort_order', [id]
+        )
+        const bankInfo = await sql.query(
+          'SELECT b.*, u.name as creator_name FROM user_word_banks b LEFT JOIN users u ON u.id = b.user_id WHERE b.id = $1',
+          [id]
+        )
+        return sendJson(res, { data: words, bank: bankInfo[0] || null })
+      }
+
+      // 获取公开词库
+      if (isPublic === 'true') {
+        const banks = await sql.query(
+          `SELECT b.*, COUNT(w.id) as word_count
+           FROM user_word_banks b
+           LEFT JOIN user_words w ON w.bank_id = b.id
+           WHERE b.is_public = true
+           GROUP BY b.id
+           ORDER BY b.updated_at DESC`
+        )
+        return sendJson(res, { data: banks })
+      }
+
+      // 获取用户私有词库
       if (!userId) return sendJson(res, { error: '缺少 userId' }, 400)
       const banks = await sql.query(
         `SELECT b.*, COUNT(w.id) as word_count
          FROM user_word_banks b
          LEFT JOIN user_words w ON w.bank_id = b.id
-         WHERE b.user_id = $1
+         WHERE b.user_id = $1 AND (b.is_public IS NULL OR b.is_public = false)
          GROUP BY b.id
          ORDER BY b.updated_at DESC`,
         [userId]
@@ -313,6 +389,59 @@ async function handleWordBanks(req, res, url) {
   }
 }
 
+// ---- 用户资料处理 ----
+
+async function handleProfiles(req, res, url) {
+  const sql = getDb()
+  if (!sql) return sendJson(res, { error: 'DATABASE_URL 未配置' }, 500)
+
+  try {
+    if (req.method === 'POST') {
+      const body = await readBody(req)
+      if (!body.userId) return sendJson(res, { error: '缺少 userId' }, 400)
+
+      // 检查是否已有 profile
+      const existing = await sql.query('SELECT * FROM profiles WHERE id = $1', [body.userId])
+      if (existing.length > 0) {
+        return sendJson(res, { data: existing[0], existed: true })
+      }
+
+      // 生成 8 位数字 ID
+      let displayId
+      for (let attempt = 0; attempt < 20; attempt++) {
+        displayId = String(10000000 + Math.floor(Math.random() * 90000000))
+        const exist = await sql.query('SELECT id FROM profiles WHERE display_id = $1', [displayId])
+        if (exist.length === 0) break
+        displayId = null
+      }
+      if (!displayId) return sendJson(res, { error: '无法生成唯一 display_id' }, 500)
+
+      await sql.query('INSERT INTO profiles (id, display_id, name) VALUES ($1, $2, $3)',
+        [body.userId, displayId, body.name || ''])
+      return sendJson(res, { data: { id: body.userId, display_id: displayId, name: body.name || '' } }, 201)
+    }
+
+    if (req.method === 'GET') {
+      const userId = url.searchParams.get('userId')
+      const displayId = url.searchParams.get('displayId')
+      if (userId) {
+        const rows = await sql.query('SELECT * FROM profiles WHERE id = $1', [userId])
+        return sendJson(res, { data: rows[0] || null })
+      }
+      if (displayId) {
+        const rows = await sql.query('SELECT * FROM profiles WHERE display_id = $1', [displayId])
+        return sendJson(res, { data: rows[0] || null })
+      }
+      return sendJson(res, { error: '缺少 userId 或 displayId' }, 400)
+    }
+
+    sendJson(res, { error: 'Method Not Allowed' }, 405)
+  } catch (err) {
+    console.error('[DB Plugin /api/profiles]', err.message)
+    sendJson(res, { error: err.message }, 500)
+  }
+}
+
 // ---- Vite 插件导出 ----
 
 export default function dbApiPlugin() {
@@ -343,6 +472,11 @@ export default function dbApiPlugin() {
       server.middlewares.use('/api/word-banks', (req, res, next) => {
         const url = new URL(req.url, `http://${req.headers.host}`)
         handleWordBanks(req, res, url).catch(() => next())
+      })
+
+      server.middlewares.use('/api/profiles', (req, res, next) => {
+        const url = new URL(req.url, `http://${req.headers.host}`)
+        handleProfiles(req, res, url).catch(() => next())
       })
     },
   }
