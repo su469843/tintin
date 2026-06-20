@@ -37,6 +37,22 @@ export const useDictationStore = defineStore('dictation', () => {
   const dictationMode = ref('display')
 
   // ============================================================
+  // 纸笔模式状态
+  // ============================================================
+  /** 纸笔模式阶段: 'setup' | 'playing' | 'marking' | 'done' */
+  const paperPhase = ref('setup')
+  /** 播放间隔（秒） */
+  const paperInterval = ref(4)
+  /** 每个单词重复次数 */
+  const paperRepeatCount = ref(2)
+  /** 纸笔模式下用户标记为错误的索引列表 */
+  const paperWrongIndices = ref([])
+  /** 是否显示答案 */
+  const showHint = ref(false)
+  /** 是否显示奖励动画 */
+  const showCelebration = ref(false)
+
+  // ============================================================
   // 本轮听写结果（用于结束后统一展示）
   // ============================================================
   /** { word, wordZh, yourAnswer, correct }[] */
@@ -305,9 +321,75 @@ export const useDictationStore = defineStore('dictation', () => {
     isReviewMode.value = false
   }
 
-  /** 设置听写模式 */
+ /** 设置听写模式 */
   function setDictationMode(mode) {
     dictationMode.value = mode
+  }
+
+  // ============================================================
+  // 纸笔模式动作
+  // ============================================================
+
+  /** 开始纸笔听写：进入 playing 阶段 */
+  function paperStart() {
+    paperPhase.value = 'playing'
+    paperWrongIndices.value = []
+    showCelebration.value = false
+    currentIndex.value = 0
+    isFinished.value = false
+  }
+
+  /** 纸笔模式：播放完所有单词后进入标记阶段 */
+  function paperFinish() {
+    isFinished.value = true
+    paperPhase.value = 'marking'
+  }
+
+  /** 纸笔模式：切换某个单词的"错误"标记 */
+  function paperToggleWrong(index) {
+    const idx = paperWrongIndices.value.indexOf(index)
+    if (idx >= 0) {
+      paperWrongIndices.value.splice(idx, 1)
+    } else {
+      paperWrongIndices.value.push(index)
+    }
+  }
+
+  /** 纸笔模式：提交错误标记，记录到错词本 */
+  async function paperSubmit() {
+    const userId = useAuthStore().userId
+    paperPhase.value = 'done'
+    // 记录本轮结果
+    sessionResults.value = wordList.value.map((w, i) => ({
+      word: getWordEn(w),
+      wordZh: getWordZh(w),
+      correct: !paperWrongIndices.value.includes(i),
+    }))
+    // 同步错误到数据库
+    if (paperWrongIndices.value.length > 0) {
+      const allCorrect = paperWrongIndices.value.length === 0
+      if (allCorrect) {
+        showCelebration.value = true
+        setTimeout(() => { showCelebration.value = false }, 3000)
+      }
+      for (const idx of paperWrongIndices.value) {
+        const w = wordList.value[idx]
+        await syncWrongWordToDB(getWordEn(w), getWordZh(w), '(纸笔)')
+      }
+    } else {
+      showCelebration.value = true
+      setTimeout(() => { showCelebration.value = false }, 3000)
+    }
+  }
+
+  /** 重置纸笔模式到设置阶段 */
+  function paperReset() {
+    paperPhase.value = 'setup'
+    paperWrongIndices.value = []
+    showCelebration.value = false
+    currentIndex.value = 0
+    isFinished.value = false
+    sessionResults.value = []
   }
 
   /** 清空错词本 */
@@ -388,6 +470,8 @@ export const useDictationStore = defineStore('dictation', () => {
     currentIndex, isPlaying, isFinished, statusMsg,
     inputText, isSubmitted, isCorrect,
     dictationMode, sessionResults, isReviewMode,
+    paperPhase, paperInterval, paperRepeatCount,
+    paperWrongIndices, showHint, showCelebration,
     wrongWords, dailyStats, learnedCount,
     playMode, autoNext, isLoading,
     // 计算属性
@@ -401,6 +485,8 @@ export const useDictationStore = defineStore('dictation', () => {
     setPlaying, setStatus, resetCurrent, resetAll,
     setDictationMode, clearWrongWords, switchBank, importBank,
     startWrongWordReview,
+    // 纸笔模式
+    paperStart, paperFinish, paperToggleWrong, paperSubmit, paperReset,
     // DB 操作
     fetchWrongWords, fetchStats, deleteWrongWord,
     syncWrongWordToDB, syncStatsToDB,

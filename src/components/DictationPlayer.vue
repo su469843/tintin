@@ -174,6 +174,30 @@ function handleListeningNext() {
   }
 }
 
+/** 纸笔模式：下一个单词 */
+function nextWordPaper() {
+  if (store.currentIndex < store.total - 1) {
+    store.currentIndex++
+    store.isSubmitted = false
+    store.isCorrect = null
+    store.inputText = ''
+    store.statusMsg = ''
+  } else {
+    store.paperFinish()
+  }
+}
+
+/** 纸笔模式：上一个单词 */
+function prevWordPaper() {
+  if (store.currentIndex > 0) {
+    store.currentIndex--
+    store.isSubmitted = false
+    store.isCorrect = null
+    store.inputText = ''
+    store.statusMsg = ''
+  }
+}
+
 // 纯听力模式：切换到此词时自动朗读
 watch(() => store.currentIndex, () => {
   if (store.dictationMode === 'listening' && !store.isFinished) {
@@ -194,23 +218,173 @@ function restartDictation() {
 
 <template>
   <div class="dictation-player">
-    <!-- 模式选择器 -->
-    <div v-if="!store.isFinished" class="mode-selector">
-      <button
-        class="mode-btn"
-        :class="{ active: store.dictationMode === 'display' }"
-        @click="store.setDictationMode('display')"
-      >
-        👁 屏幕显示
-      </button>
-      <button
-        class="mode-btn"
-        :class="{ active: store.dictationMode === 'listening' }"
-        @click="store.setDictationMode('listening')"
-      >
-        👂 纯听力
-      </button>
-    </div>
+
+    <!-- ============================================================
+         纸笔模式：设置阶段
+    ============================================================ -->
+    <template v-if="store.dictationMode === 'paper' && store.paperPhase === 'setup'">
+      <div class="paper-setup">
+        <h3 class="setup-title">📄 纸笔听写设置</h3>
+
+        <div class="setup-group">
+          <label class="setup-label">选择词库</label>
+          <div class="bank-list">
+            <button v-for="name in store.bankNames" :key="name"
+              class="bank-chip" :class="{ active: store.currentBank === name }"
+              @click="store.switchBank(name)">
+              {{ name }}
+            </button>
+          </div>
+        </div>
+
+        <div class="setup-group">
+          <label class="setup-label">播放间隔：{{ store.paperInterval }} 秒</label>
+          <input type="range" min="2" max="10" step="1"
+            v-model.number="store.paperInterval" class="setup-slider" />
+        </div>
+
+        <div class="setup-group">
+          <label class="setup-label">每个单词播放次数</label>
+          <div class="repeat-options">
+            <button :class="{ active: store.paperRepeatCount === 2 }"
+              @click="store.paperRepeatCount = 2">2 遍</button>
+            <button :class="{ active: store.paperRepeatCount === 3 }"
+              @click="store.paperRepeatCount = 3">3 遍</button>
+          </div>
+        </div>
+
+        <button class="btn btn-primary btn-start" @click="store.paperStart()">
+          🎯 开始听写（共 {{ store.total }} 词）
+        </button>
+      </div>
+    </template>
+
+    <!-- ============================================================
+         纸笔模式：播放阶段（简洁版）
+         上面中文提示，下面播报 + 上/下一个
+    ============================================================ -->
+    <template v-else-if="store.dictationMode === 'paper' && store.paperPhase === 'playing'">
+      <div class="paper-playing">
+        <!-- 进度 -->
+        <p class="paper-progress">{{ store.currentIndex + 1 }} / {{ store.total }}</p>
+
+        <!-- 中文提示 -->
+        <div class="paper-hint" @click="store.showHint = !store.showHint">
+          <template v-if="store.currentWordZh">
+            <p class="hint-zh">{{ store.currentWordZh }}</p>
+            <p class="hint-tap">{{ store.showHint ? '点击隐藏' : '点击显示答案' }}</p>
+          </template>
+          <p v-else class="hint-en">{{ store.currentWord }}</p>
+        </div>
+
+        <!-- 答案（点击提示后显示） -->
+        <transition name="fade">
+          <p v-if="store.showHint && store.currentWordZh" class="paper-answer">
+            {{ store.currentWord }}
+          </p>
+        </transition>
+
+        <!-- 控制按钮 -->
+        <div class="paper-controls">
+          <button class="btn btn-secondary" :disabled="store.currentIndex === 0" @click="prevWordPaper">
+            ◀ 上一个
+          </button>
+          <button class="btn btn-primary" :disabled="store.isPlaying" @click="speakCurrent">
+            🔊 播报
+          </button>
+          <button class="btn btn-secondary" :disabled="store.isPlaying" @click="nextWordPaper">
+            下一个 ▶
+          </button>
+        </div>
+      </div>
+    </template>
+
+    <!-- ============================================================
+         纸笔模式：标记阶段
+    ============================================================ -->
+    <template v-else-if="store.dictationMode === 'paper' && store.paperPhase === 'marking'">
+      <div class="paper-marking">
+        <h3 class="marking-title">✏️ 标记错词</h3>
+        <p class="marking-hint">点击你写错的单词打 ❌，正确的不用动</p>
+        <div class="marking-list">
+          <div v-for="(w, i) in store.wordList" :key="i"
+            class="marking-item"
+            :class="{ wrong: store.paperWrongIndices.includes(i) }"
+            @click="store.paperToggleWrong(i)">
+            <div class="marking-word">
+              <span class="marking-en">{{ store.getWordEn(w) }}</span>
+              <span class="marking-zh">{{ store.getWordZh(w) }}</span>
+            </div>
+            <span class="marking-status">
+              {{ store.paperWrongIndices.includes(i) ? '❌' : '✅' }}
+            </span>
+          </div>
+        </div>
+        <div class="marking-actions">
+          <p class="marking-summary">
+            标记 {{ store.paperWrongIndices.length }} 个错误
+          </p>
+          <button class="btn btn-primary" @click="store.paperSubmit()">
+            ✅ 确认提交
+          </button>
+        </div>
+      </div>
+    </template>
+
+    <!-- ============================================================
+         纸笔模式：完成 + 庆祝
+    ============================================================ -->
+    <template v-else-if="store.dictationMode === 'paper' && store.paperPhase === 'done'">
+      <div class="session-result">
+        <!-- 庆祝动画 -->
+        <div v-if="store.showCelebration" class="celebration-overlay">
+          <div class="confetti-container">
+            <div v-for="i in 30" :key="i" class="confetti"
+              :style="{
+                left: Math.random() * 100 + '%',
+                animationDelay: Math.random() * 2 + 's',
+                animationDuration: (1.5 + Math.random() * 2) + 's',
+                backgroundColor: ['#f44336','#e91e63','#9c27b0','#3f51b5','#03a9f4','#009688','#4caf50','#ffeb3b','#ff9800'][i % 9]
+              }">
+            </div>
+          </div>
+          <div class="celebration-text">
+            <span class="big-star">🌟</span>
+            <h2>全部正确！太棒了！</h2>
+            <p>{{ store.total }} 个单词全部正确</p>
+          </div>
+        </div>
+
+        <h3 class="result-title">🎉 听写完成！</h3>
+        <div class="result-stats">
+          <div class="stat-item">
+            <span class="stat-num">{{ store.total }}</span>
+            <span class="stat-label">总计</span>
+          </div>
+          <div class="stat-item correct">
+            <span class="stat-num">{{ store.total - store.paperWrongIndices.length }}</span>
+            <span class="stat-label">正确</span>
+          </div>
+          <div class="stat-item wrong">
+            <span class="stat-num">{{ store.paperWrongIndices.length }}</span>
+            <span class="stat-label">错误</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-num">{{ Math.round((store.total - store.paperWrongIndices.length) / store.total * 100) }}%</span>
+            <span class="stat-label">正确率</span>
+          </div>
+        </div>
+
+        <div class="result-actions">
+          <button class="btn btn-primary" @click="store.paperReset()">🔄 再来一轮</button>
+        </div>
+      </div>
+    </template>
+
+    <!-- ============================================================
+         非纸笔模式（原有模式）
+    ============================================================ -->
+    <template v-else>
 
     <!-- ============ 本轮完成：结果展示 ============ -->
     <div v-if="store.isFinished" class="session-result">
@@ -259,22 +433,36 @@ function restartDictation() {
       <div class="word-display">
         <!-- ---- 屏幕显示模式 ---- -->
         <template v-if="store.dictationMode === 'display'">
-          <!-- 语文词库：只显示拼音 -->
           <div v-if="store.isChineseBank" class="word-block">
             <p class="word-pinyin">{{ store.currentWordZh }}</p>
           </div>
-          <!-- 英语词库：显示单词 + 中文释义 -->
           <div v-else class="word-block">
             <p class="word-en">{{ store.currentWord }}</p>
             <p v-if="store.currentWordZh" class="word-zh">{{ store.currentWordZh }}</p>
           </div>
         </template>
 
+        <!-- ---- 中文提示模式：只显示中文，隐藏英文 ---- -->
+        <template v-else-if="store.dictationMode === 'chinese_only'">
+          <div class="word-block">
+            <p v-if="store.currentWordZh" class="word-zh chinese-only">{{ store.currentWordZh }}</p>
+            <p v-else class="word-en">{{ store.currentWord }}</p>
+          </div>
+        </template>
+
         <!-- ---- 纯听力模式：不显示任何文字 ---- -->
-        <template v-else>
+        <template v-else-if="store.dictationMode === 'listening'">
           <div class="listening-icon">
             <span class="big-icon">🔊</span>
             <p class="listening-hint">请听音频，写出单词</p>
+          </div>
+        </template>
+
+        <!-- ---- 纸笔模式：只听不写 ---- -->
+        <template v-else>
+          <div class="listening-icon">
+            <span class="big-icon">📝</span>
+            <p class="listening-hint">听写 {{ store.currentIndex + 1 }}/{{ store.total }}</p>
           </div>
         </template>
       </div>
@@ -364,6 +552,7 @@ function restartDictation() {
           <span v-if="store.currentWordZh">（{{ store.currentWordZh }}）</span>
         </template>
       </div>
+    </template>
     </template>
   </div>
 </template>
