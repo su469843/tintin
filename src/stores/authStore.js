@@ -15,6 +15,9 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoading = ref(false)  // 登录/注册中
   const isInitialized = ref(false) // 初始化完成（首次 getSession 后）
   const errorMsg = ref('')
+  const myInviteCode = ref(null) // 当前用户的邀请码
+  const inviteRemaining = ref(0) // 剩余可邀请名额
+  const inviteUsedCount = ref(0) // 已邀请人数
 
   // ============================================================
   // 计算属性
@@ -46,8 +49,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   /**
    * 邮箱注册
+   * @param {string} inviteCode - 邀请码（可选）
    */
-  async function signUp(email, password, name) {
+  async function signUp(email, password, name, inviteCode) {
     isLoading.value = true
     errorMsg.value = ''
     try {
@@ -66,6 +70,26 @@ export const useAuthStore = defineStore('auth', () => {
       if (result?.data) {
         session.value = result.data
         user.value = result.data.user || null
+
+        // 注册成功后处理邀请码
+        const newUserId = result.data.user?.id
+        if (newUserId) {
+          // 如果有邀请码，标记为已使用
+          if (inviteCode) {
+            await fetch('/api/invitations', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                code: inviteCode,
+                userId: newUserId,
+                email: email,
+              }),
+            }).catch(() => {}) // 忽略失败
+          }
+
+          // 为新用户生成邀请码
+          await generateInviteCode(newUserId)
+        }
       }
       return true
     } catch (err) {
@@ -73,6 +97,39 @@ export const useAuthStore = defineStore('auth', () => {
       return false
     } finally {
       isLoading.value = false
+    }
+  }
+
+  /**
+   * 获取邀请码信息（有则返回，无则创建）
+   */
+  async function generateInviteCode(userId) {
+    try {
+      // 先查询用户邀请码信息
+      const infoResp = await fetch(`/api/invitations?userId=${encodeURIComponent(userId)}`)
+      const info = await infoResp.json()
+
+      if (info.hasCode) {
+        myInviteCode.value = info.code
+        inviteUsedCount.value = info.usedCount
+        inviteRemaining.value = info.remaining
+        return
+      }
+
+      // 没有则创建
+      const resp = await fetch('/api/invitations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      })
+      const json = await resp.json()
+      if (json.success && json.code) {
+        myInviteCode.value = json.code
+        inviteUsedCount.value = 0
+        inviteRemaining.value = 3
+      }
+    } catch (err) {
+      console.warn('[Auth] 获取邀请码失败:', err.message)
     }
   }
 
@@ -134,6 +191,9 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading,
     isInitialized,
     errorMsg,
+    myInviteCode,
+    inviteRemaining,
+    inviteUsedCount,
     // 计算属性
     isLoggedIn,
     userId,
@@ -143,5 +203,6 @@ export const useAuthStore = defineStore('auth', () => {
     signIn,
     signOut,
     clearError,
+    generateInviteCode,
   }
 })

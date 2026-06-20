@@ -182,6 +182,137 @@ async function handleStats(req, res, url) {
   }
 }
 
+// ---- 邀请码处理 ----
+
+/** 生成 8 位随机邀请码 */
+function generateCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  let code = ''
+  for (let i = 0; i < 8; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return code
+}
+
+async function handleInvitations(req, res, url) {
+  const sql = getDb()
+  if (!sql) return sendJson(res, { error: 'DATABASE_URL 未配置' }, 500)
+
+  try {
+    if (req.method === 'GET') {
+      const code = url.searchParams.get('code')
+      if (!code) return sendJson(res, { error: '缺少 code' }, 400)
+      const rows = await sql.query(
+        'SELECT * FROM invitations WHERE code = $1 AND is_active = true AND used_by IS NULL',
+        [code.toUpperCase()]
+      )
+      return rows.length > 0
+        ? sendJson(res, { valid: true })
+        : sendJson(res, { valid: false, message: '邀请码无效或已使用' })
+    }
+
+    if (req.method === 'POST') {
+      const body = await readBody(req)
+      if (!body.userId) return sendJson(res, { error: '缺少 userId' }, 400)
+      let code, attempts = 0
+      do {
+        code = generateCode()
+        const existing = await sql.query('SELECT id FROM invitations WHERE code = $1', [code])
+        if (existing.length === 0) break
+        attempts++
+      } while (attempts < 10)
+      await sql.query('INSERT INTO invitations (code, created_by) VALUES ($1, $2)', [code, body.userId])
+      return sendJson(res, { success: true, code }, 201)
+    }
+
+    if (req.method === 'PUT') {
+      const body = await readBody(req)
+      if (!body.code || !body.userId) return sendJson(res, { error: '缺少 code 或 userId' }, 400)
+      const rows = await sql.query(
+        'SELECT * FROM invitations WHERE code = $1 AND is_active = true AND used_by IS NULL',
+        [body.code.toUpperCase()]
+      )
+      if (rows.length === 0) return sendJson(res, { error: '邀请码无效或已使用' }, 400)
+      await sql.query(
+        'UPDATE invitations SET used_by = $1, used_by_email = $2, used_at = NOW(), is_active = false WHERE code = $3',
+        [body.userId, body.email || null, body.code.toUpperCase()]
+      )
+      return sendJson(res, { success: true })
+    }
+
+    sendJson(res, { error: 'Method Not Allowed' }, 405)
+  } catch (err) {
+    console.error('[DB Plugin /api/invitations]', err.message)
+    sendJson(res, { error: err.message }, 500)
+  }
+}
+
+// ---- 用户词库处理 ----
+
+async function handleWordBanks(req, res, url) {
+  const sql = getDb()
+  if (!sql) return sendJson(res, { error: 'DATABASE_URL 未配置' }, 500)
+
+  try {
+    if (req.method === 'GET') {
+      const userId = url.searchParams.get('userId')
+      if (!userId) return sendJson(res, { error: '缺少 userId' }, 400)
+      const banks = await sql.query(
+        `SELECT b.*, COUNT(w.id) as word_count
+         FROM user_word_banks b
+         LEFT JOIN user_words w ON w.bank_id = b.id
+         WHERE b.user_id = $1
+         GROUP BY b.id
+         ORDER BY b.updated_at DESC`,
+        [userId]
+      )
+      return sendJson(res, { data: banks })
+    }
+
+    if (req.method === 'POST') {
+      const body = await readBody(req)
+      if (!body.userId || !body.name || !body.lang) {
+        return sendJson(res, { error: '缺少 userId, name 或 lang' }, 400)
+      }
+      const bankResult = await sql.query(
+        `INSERT INTO user_word_banks (user_id, name, lang)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_id, name) DO UPDATE SET updated_at = NOW()
+         RETURNING id`,
+        [body.userId, body.name, body.lang]
+      )
+      const bankId = bankResult[0]?.id
+      if (body.words && Array.isArray(body.words) && body.words.length > 0) {
+        for (let i = 0; i < body.words.length; i++) {
+          const w = body.words[i]
+          await sql.query(
+            'INSERT INTO user_words (bank_id, word, translation, sort_order) VALUES ($1, $2, $3, $4)',
+            [bankId, w.word, w.translation || null, i]
+          )
+        }
+      }
+      return sendJson(res, { success: true, bankId, wordCount: body.words?.length || 0 }, 201)
+    }
+
+    if (req.method === 'DELETE') {
+      const body = await readBody(req)
+      if (!body.userId || !body.bankId) return sendJson(res, { error: '缺少 userId 或 bankId' }, 400)
+      const bank = await sql.query(
+        'SELECT * FROM user_word_banks WHERE id = $1 AND user_id = $2',
+        [body.bankId, body.userId]
+      )
+      if (bank.length === 0) return sendJson(res, { error: '词库不存在或无权限' }, 404)
+      await sql.query('DELETE FROM user_word_banks WHERE id = $1', [body.bankId])
+      return sendJson(res, { success: true })
+    }
+
+    sendJson(res, { error: 'Method Not Allowed' }, 405)
+  } catch (err) {
+    console.error('[DB Plugin /api/word-banks]', err.message)
+    sendJson(res, { error: err.message }, 500)
+  }
+}
+
 // ---- Vite 插件导出 ----
 
 export default function dbApiPlugin() {
@@ -202,6 +333,16 @@ export default function dbApiPlugin() {
       server.middlewares.use('/api/stats', (req, res, next) => {
         const url = new URL(req.url, `http://${req.headers.host}`)
         handleStats(req, res, url).catch(() => next())
+      })
+
+      server.middlewares.use('/api/invitations', (req, res, next) => {
+        const url = new URL(req.url, `http://${req.headers.host}`)
+        handleInvitations(req, res, url).catch(() => next())
+      })
+
+      server.middlewares.use('/api/word-banks', (req, res, next) => {
+        const url = new URL(req.url, `http://${req.headers.host}`)
+        handleWordBanks(req, res, url).catch(() => next())
       })
     },
   }

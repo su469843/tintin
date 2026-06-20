@@ -137,6 +137,11 @@ onMounted(async () => {
   // 如果未登录，等待用户登录（AuthView 会显示）
   if (!authStore.isLoggedIn) return
 
+  // 已登录，生成邀请码（如果还没有）
+  if (!authStore.myInviteCode && authStore.userId) {
+    await authStore.generateInviteCode(authStore.userId)
+  }
+
   // 已登录，加载数据
   await loadAppData()
 })
@@ -187,6 +192,18 @@ onUnmounted(() => {
 function switchToDictation() {
   activeTab.value = 'dictation'
 }
+
+/** 复制邀请链接到剪贴板 */
+async function copyInviteLink() {
+  if (!authStore.myInviteCode) return
+  const link = `${window.location.origin}/?invite=${authStore.myInviteCode}`
+  try {
+    await navigator.clipboard.writeText(link)
+    alert('✅ 邀请链接已复制：' + link)
+  } catch {
+    alert('📋 邀请码：' + authStore.myInviteCode)
+  }
+}
 </script>
 
 <template>
@@ -204,7 +221,15 @@ function switchToDictation() {
     <!-- 顶部用户栏 -->
     <div class="user-bar">
       <span class="user-info">👤 {{ authStore.user?.name || authStore.user?.email }}</span>
-      <button class="btn-logout" @click="authStore.signOut()">退出</button>
+      <div class="user-actions">
+        <div v-if="authStore.myInviteCode" class="invite-block" @click="copyInviteLink">
+          <span class="invite-code" title="点击复制邀请链接">
+            🎟️ {{ authStore.myInviteCode }}
+          </span>
+          <span class="invite-count">剩余 {{ authStore.inviteRemaining }}/3</span>
+        </div>
+        <button class="btn-logout" @click="authStore.signOut()">退出</button>
+      </div>
     </div>
 
     <!-- 标签栏 -->
@@ -324,6 +349,41 @@ body {
 .btn-logout:hover {
   background: var(--bg-secondary);
   color: var(--text-primary);
+}
+
+.user-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.invite-block {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(16, 185, 129, 0.1);
+  transition: background 0.2s;
+}
+
+.invite-block:hover {
+  background: rgba(16, 185, 129, 0.2);
+}
+
+.invite-code {
+  font-size: 12px;
+  font-weight: 600;
+  color: #10b981;
+  letter-spacing: 1px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.invite-count {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .app {

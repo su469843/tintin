@@ -1,10 +1,11 @@
 <script setup>
 /**
  * AuthView.vue - 登录/注册界面
- * Neon Auth 邮箱 + 密码认证
+ * Neon Auth 邮箱 + 密码认证 + 邀请码
  */
-import { ref } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useAuthStore } from '../stores/authStore'
+import { configError } from '../lib/neonClient'
 
 const authStore = useAuthStore()
 
@@ -12,6 +13,37 @@ const isSignUp = ref(false)
 const email = ref('')
 const password = ref('')
 const name = ref('')
+const inviteCode = ref('')
+
+// 从 URL 参数自动读取邀请码
+onMounted(() => {
+  const params = new URLSearchParams(window.location.search)
+  const invite = params.get('invite')
+  if (invite) {
+    inviteCode.value = invite.toUpperCase()
+    isSignUp.value = true // 有邀请码直接跳到注册
+  }
+})
+
+// ============================================================
+// 邀请码开关：设为 true 启用邀请码验证
+// 首次注册时可设为 false，注册成功后再开启
+// ============================================================
+const REQUIRE_INVITE = false // ← 控制是否需要邀请码
+
+/** 注册时验证邀请码 */
+async function validateInviteCode(code) {
+  if (!REQUIRE_INVITE) return true
+  if (!code) return false
+
+  try {
+    const resp = await fetch(`/api/invitations?code=${encodeURIComponent(code)}`)
+    const json = await resp.json()
+    return json.valid === true
+  } catch {
+    return false
+  }
+}
 
 async function handleSubmit() {
   if (!email.value || !password.value) {
@@ -20,16 +52,30 @@ async function handleSubmit() {
 
   let ok
   if (isSignUp.value) {
-    ok = await authStore.signUp(email.value, password.value, name.value)
+    // 注册前验证邀请码
+    if (REQUIRE_INVITE && !inviteCode.value) {
+      authStore.errorMsg = '请输入邀请码'
+      return
+    }
+
+    if (REQUIRE_INVITE) {
+      const valid = await validateInviteCode(inviteCode.value)
+      if (!valid) {
+        authStore.errorMsg = '邀请码无效或已使用'
+        return
+      }
+    }
+
+    ok = await authStore.signUp(email.value, password.value, name.value, inviteCode.value)
   } else {
     ok = await authStore.signIn(email.value, password.value)
   }
 
   if (ok) {
-    // 登录/注册成功，App.vue 会自动切换到主界面
     email.value = ''
     password.value = ''
     name.value = ''
+    inviteCode.value = ''
   }
 }
 
@@ -37,6 +83,9 @@ function toggleMode() {
   isSignUp.value = !isSignUp.value
   authStore.clearError()
 }
+
+// 切换模式时清除错误
+watch(isSignUp, () => authStore.clearError())
 </script>
 
 <template>
@@ -79,6 +128,23 @@ function toggleMode() {
             autocomplete="current-password"
             required
             minlength="6"
+          />
+        </div>
+
+        <!-- 邀请码（仅注册时显示，且 REQUIRE_INVITE 开启时必填） -->
+        <div v-if="isSignUp" class="form-group">
+          <label class="form-label">
+            邀请码
+            <span v-if="!REQUIRE_INVITE" class="label-hint">（暂不强制）</span>
+          </label>
+          <input
+            v-model="inviteCode"
+            type="text"
+            class="form-input"
+            :placeholder="REQUIRE_INVITE ? '请输入邀请码' : '有邀请码可填入'"
+            :required="REQUIRE_INVITE"
+            maxlength="10"
+            style="text-transform: uppercase; letter-spacing: 2px;"
           />
         </div>
 
@@ -153,6 +219,12 @@ function toggleMode() {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-secondary);
+}
+
+.label-hint {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .form-input {
