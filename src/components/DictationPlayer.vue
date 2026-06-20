@@ -962,6 +962,37 @@ function restartDictation() {
   gap: 20px;
 }
 .setup-title { font-size: 22px; font-weight: 700; margin: 0; }
+
+.bank-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.bank-chip {
+  padding: 8px 16px;
+  border: 2px solid var(--border-color, #e2e8f0);
+  border-radius: 20px;
+  background: var(--bg-card, #fff);
+  color: var(--text-secondary, #475569);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.bank-chip:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+.bank-chip.active {
+  background: #3b82f6;
+  color: #fff;
+  border-color: #3b82f6;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
 .setup-group { display: flex; flex-direction: column; gap: 8px; }
 .setup-label { font-size: 15px; font-weight: 600; color: var(--text-secondary); }
 .setup-slider { width: 100%; height: 6px; }
