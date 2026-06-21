@@ -240,7 +240,7 @@ watch(isSignUp, () => authStore.clearError())
 }
 
 .form-input:focus {
-  border-color: #3b82f6;
+  border-color: #0ea5e9;
 }
 
 .form-input::placeholder {
@@ -260,7 +260,7 @@ watch(isSignUp, () => authStore.clearError())
   height: 56px;
   border: none;
   border-radius: 12px;
-  background: #3b82f6;
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
   color: #fff;
   font-size: 17px;
   font-weight: 700;
@@ -270,7 +270,7 @@ watch(isSignUp, () => authStore.clearError())
 }
 
 .btn-submit:hover:not(:disabled) {
-  background: #2563eb;
+  background: linear-gradient(135deg, #0284c7, #0369a1);
 }
 
 .btn-submit:active:not(:disabled) {
@@ -292,7 +292,7 @@ watch(isSignUp, () => authStore.clearError())
 .link-btn {
   background: none;
   border: none;
-  color: #3b82f6;
+  color: #0ea5e9;
   font-weight: 600;
   cursor: pointer;
   font-size: 14px;

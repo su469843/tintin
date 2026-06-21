@@ -283,25 +283,33 @@ async function copyInviteLink() {
 <style>
 :root,
 [data-theme='light'] {
-  --bg-primary: #f0f4f8;
+  --bg-primary: #f0f9ff;
   --bg-card: #ffffff;
-  --bg-secondary: #e2e8f0;
+  --bg-secondary: #e0f2fe;
   --bg-input: #ffffff;
-  --text-primary: #1e293b;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
-  --border-color: #e2e8f0;
+  --text-primary: #0c4a6e;
+  --text-secondary: #0369a1;
+  --text-muted: #7dd3fc;
+  --border-color: #bae6fd;
+  --accent: #0ea5e9;
+  --accent-dark: #0284c7;
+  --accent-light: #38bdf8;
+  --accent-bg: #e0f2fe;
 }
 
 [data-theme='dark'] {
-  --bg-primary: #0f172a;
-  --bg-card: #1e293b;
-  --bg-secondary: #334155;
-  --bg-input: #1e293b;
-  --text-primary: #f1f5f9;
-  --text-secondary: #cbd5e1;
-  --text-muted: #64748b;
-  --border-color: #334155;
+  --bg-primary: #0c1222;
+  --bg-card: #1a2744;
+  --bg-secondary: #253a5e;
+  --bg-input: #1a2744;
+  --text-primary: #e0f2fe;
+  --text-secondary: #7dd3fc;
+  --text-muted: #38bdf8;
+  --border-color: #253a5e;
+  --accent: #38bdf8;
+  --accent-dark: #0ea5e9;
+  --accent-light: #7dd3fc;
+  --accent-bg: #1a2744;
 }
 
 * {
@@ -376,18 +384,18 @@ body {
   cursor: pointer;
   padding: 4px 10px;
   border-radius: 8px;
-  background: rgba(16, 185, 129, 0.1);
+  background: rgba(14, 165, 233, 0.1);
   transition: background 0.2s;
 }
 
 .invite-block:hover {
-  background: rgba(16, 185, 129, 0.2);
+  background: rgba(14, 165, 233, 0.2);
 }
 
 .invite-code {
   font-size: 12px;
   font-weight: 600;
-  color: #10b981;
+  color: #0ea5e9;
   letter-spacing: 1px;
   user-select: text;
   -webkit-user-select: text;
@@ -413,7 +421,7 @@ body {
   width: 40px;
   height: 40px;
   border: 4px solid var(--bg-secondary);
-  border-top: 4px solid #3b82f6;
+  border-top: 4px solid #0ea5e9;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -432,44 +440,45 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 16px 16px 40px;
+  padding: 12px 12px 32px;
   transition: background-color 0.3s;
 }
 
 .tab-bar {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   width: 100%;
   max-width: 520px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   background: var(--bg-card);
-  border-radius: 16px;
-  padding: 5px;
+  border-radius: 14px;
+  padding: 4px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 }
 
 .tab {
   flex: 1;
-  height: 44px;
+  height: 40px;
   border: none;
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
+  padding: 0 4px;
 }
 
 .tab.active {
-  background: #3b82f6;
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
   color: #fff;
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 2px 12px rgba(14, 165, 233, 0.4);
 }
 
 .tab:active:not(.active) {
-  background: var(--bg-secondary);
+  background: var(--accent-bg);
 }
 
 .content {
@@ -478,5 +487,48 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
+}
+
+/* 手机端适配 */
+@media (max-width: 420px) {
+  .app {
+    padding: 8px 8px 24px;
+  }
+
+  .user-bar {
+    max-width: 100%;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .user-info {
+    font-size: 13px;
+  }
+
+  .invite-code {
+    font-size: 11px;
+  }
+
+  .invite-count {
+    font-size: 10px;
+  }
+
+  .tab-bar {
+    gap: 2px;
+    padding: 3px;
+    margin-bottom: 12px;
+    border-radius: 12px;
+  }
+
+  .tab {
+    height: 36px;
+    font-size: 12px;
+    border-radius: 9px;
+  }
+
+  .content {
+    max-width: 100%;
+  }
 }
 </style>

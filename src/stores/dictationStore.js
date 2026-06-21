@@ -51,6 +51,8 @@ export const useDictationStore = defineStore('dictation', () => {
   const showHint = ref(false)
   /** 是否显示奖励动画 */
   const showCelebration = ref(false)
+  /** 听写模式下是否已显示提示（点击提示按钮后为true） */
+  const hintRevealed = ref(false)
 
   // ============================================================
   // 本轮听写结果（用于结束后统一展示）
@@ -244,6 +246,7 @@ export const useDictationStore = defineStore('dictation', () => {
     statusMsg.value = ''
     sessionResults.value = []
     isReviewMode.value = false
+    hintRevealed.value = false
   }
 
   /** 提交输入答案 */
@@ -294,6 +297,7 @@ export const useDictationStore = defineStore('dictation', () => {
       isCorrect.value = null
       inputText.value = ''
       statusMsg.value = ''
+      hintRevealed.value = false
     } else {
       isFinished.value = true
     }
@@ -307,6 +311,7 @@ export const useDictationStore = defineStore('dictation', () => {
     isCorrect.value = null
     inputText.value = ''
     statusMsg.value = ''
+    hintRevealed.value = false
   }
 
   function resetAll() {
@@ -355,7 +360,7 @@ export const useDictationStore = defineStore('dictation', () => {
     }
   }
 
-  /** 纸笔模式：提交错误标记，记录到错词本 */
+  /** 纸笔模式：提交错误标记，记录到错词本 + 同步统计 */
   async function paperSubmit() {
     const userId = useAuthStore().userId
     paperPhase.value = 'done'
@@ -365,20 +370,33 @@ export const useDictationStore = defineStore('dictation', () => {
       wordZh: getWordZh(w),
       correct: !paperWrongIndices.value.includes(i),
     }))
+
+    const totalWords = wordList.value.length
+    const wrongCount = paperWrongIndices.value.length
+    const correctCount = totalWords - wrongCount
+
+    // 更新本地统计
+    const d = today.value
+    if (!dailyStats.value[d]) {
+      dailyStats.value[d] = { total: 0, correct: 0, wrong: 0 }
+    }
+    dailyStats.value[d].total += totalWords
+    dailyStats.value[d].correct += correctCount
+    dailyStats.value[d].wrong += wrongCount
+    learnedCount.value += totalWords
+
+    // 同步统计到数据库
+    syncStatsToDB(d, totalWords, correctCount, wrongCount)
+
     // 同步错误到数据库
-    if (paperWrongIndices.value.length > 0) {
-      const allCorrect = paperWrongIndices.value.length === 0
-      if (allCorrect) {
-        showCelebration.value = true
-        setTimeout(() => { showCelebration.value = false }, 3000)
-      }
+    if (wrongCount === 0) {
+      showCelebration.value = true
+      setTimeout(() => { showCelebration.value = false }, 3000)
+    } else {
       for (const idx of paperWrongIndices.value) {
         const w = wordList.value[idx]
         await syncWrongWordToDB(getWordEn(w), getWordZh(w), '(纸笔)')
       }
-    } else {
-      showCelebration.value = true
-      setTimeout(() => { showCelebration.value = false }, 3000)
     }
   }
 
@@ -485,6 +503,8 @@ export const useDictationStore = defineStore('dictation', () => {
     setPlaying, setStatus, resetCurrent, resetAll,
     setDictationMode, clearWrongWords, switchBank, importBank,
     startWrongWordReview,
+    // 提示
+    hintRevealed,
     // 纸笔模式
     paperStart, paperFinish, paperToggleWrong, paperSubmit, paperReset,
     // DB 操作

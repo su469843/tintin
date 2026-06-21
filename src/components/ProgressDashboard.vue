@@ -5,10 +5,15 @@
  *
  * 数据来源：PostgreSQL（通过 store 的 fetchStats 加载）
  */
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useDictationStore } from '../stores/dictationStore'
 
 const store = useDictationStore()
+
+// 每次进入进度标签时自动刷新数据
+onMounted(async () => {
+  await Promise.all([store.fetchStats(), store.fetchWrongWords()])
+})
 
 const accuracyRate = computed(() => {
   const { total, correct } = store.todayStats
@@ -23,14 +28,27 @@ const weekStats = computed(() => {
     d.setDate(d.getDate() - i)
     const key = d.toISOString().slice(0, 10)
     const dayData = store.dailyStats[key]
+    const total = dayData?.total ?? 0
+    const correct = dayData?.correct ?? 0
+    const rate = total ? Math.round((correct / total) * 100) : 0
     stats.push({
       date: key.slice(5),
-      total: dayData?.total ?? 0,
-      correct: dayData?.correct ?? 0,
-      rate: dayData?.total ? Math.round((dayData.correct / dayData.total) * 100) : 0
+      total,
+      correct,
+      wrong: total - correct,
+      rate,
     })
   }
   return stats
+})
+
+const totalStats = computed(() => {
+  let total = 0, correct = 0
+  for (const data of Object.values(store.dailyStats)) {
+    total += data.total || 0
+    correct += data.correct || 0
+  }
+  return { total, correct, wrong: total - correct, rate: total ? Math.round(correct / total * 100) : 0 }
 })
 
 const todayStatus = computed(() => {
@@ -63,7 +81,7 @@ async function refreshData() {
             class="ring-fill"
             :style="{
               strokeDasharray: `${accuracyRate * 2.64} ${264 - accuracyRate * 2.64}`,
-              stroke: accuracyRate >= 80 ? '#10b981' : accuracyRate >= 60 ? '#f59e0b' : '#ef4444'
+              stroke: accuracyRate >= 80 ? '#10b981' : accuracyRate >= 60 ? '#0ea5e9' : '#ef4444'
             }"
           />
           <text x="50" y="50" text-anchor="middle" dominant-baseline="central" class="ring-text">
@@ -74,19 +92,41 @@ async function refreshData() {
       </div>
     </div>
 
+    <!-- 累计统计 -->
+    <div class="total-stats">
+      <div class="stat-box">
+        <span class="stat-num">{{ totalStats.total }}</span>
+        <span class="stat-label">累计练习</span>
+      </div>
+      <div class="stat-box correct">
+        <span class="stat-num">{{ totalStats.correct }}</span>
+        <span class="stat-label">正确</span>
+      </div>
+      <div class="stat-box wrong">
+        <span class="stat-num">{{ totalStats.wrong }}</span>
+        <span class="stat-label">错误</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-num">{{ totalStats.rate }}%</span>
+        <span class="stat-label">总正确率</span>
+      </div>
+    </div>
+
     <!-- 最近一周统计 -->
     <div class="week-stats">
       <p class="sub-title">近 7 天趋势</p>
       <div class="bar-chart">
         <div v-for="day in weekStats" :key="day.date" class="bar-item">
+          <div class="bar-value">{{ day.total > 0 ? day.total : '' }}</div>
           <div class="bar-wrapper">
             <div
               class="bar"
-              :style="{ height: day.total > 0 ? `${Math.max(day.rate, 4)}%` : '4%' }"
+              :style="{ height: day.total > 0 ? `${Math.max(day.rate, 8)}%` : '4%' }"
               :class="{
                 good: day.rate >= 80,
                 medium: day.rate >= 60 && day.rate < 80,
-                poor: day.rate < 60
+                poor: day.total > 0 && day.rate < 60,
+                empty: day.total === 0
               }"
             />
           </div>
@@ -116,7 +156,7 @@ async function refreshData() {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
 
 .dashboard-header {
@@ -160,7 +200,7 @@ async function refreshData() {
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  padding: 20px;
+  padding: 16px;
   background: var(--bg-card, #fff);
   border-radius: 16px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
@@ -168,8 +208,9 @@ async function refreshData() {
 
 .today-status {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   color: var(--text-muted, #94a3b8);
+  text-align: center;
 }
 
 .accuracy-ring {
@@ -180,8 +221,8 @@ async function refreshData() {
 }
 
 .ring-svg {
-  width: 100px;
-  height: 100px;
+  width: 90px;
+  height: 90px;
   transform: rotate(-90deg);
 }
 
@@ -212,7 +253,7 @@ async function refreshData() {
 }
 
 .week-stats {
-  padding: 16px;
+  padding: 14px;
   background: var(--bg-card, #fff);
   border-radius: 16px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
@@ -223,7 +264,7 @@ async function refreshData() {
   justify-content: space-between;
   align-items: flex-end;
   gap: 4px;
-  height: 100px;
+  height: 90px;
 }
 
 .bar-item {
@@ -232,11 +273,12 @@ async function refreshData() {
   align-items: center;
   gap: 4px;
   flex: 1;
+  min-width: 0;
 }
 
 .bar-wrapper {
   width: 100%;
-  height: 80px;
+  height: 70px;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -244,22 +286,63 @@ async function refreshData() {
 
 .bar {
   width: 60%;
+  min-width: 12px;
   border-radius: 4px 4px 0 0;
   transition: height 0.3s ease;
   min-height: 4px;
 }
 
-.bar.good { background: #10b981; }
-.bar.medium { background: #f59e0b; }
-.bar.poor { background: #ef4444; }
+.bar.good { background: linear-gradient(180deg, #0ea5e9, #0284c7); }
+.bar.medium { background: linear-gradient(180deg, #38bdf8, #0ea5e9); }
+.bar.poor { background: linear-gradient(180deg, #fb923c, #f97316); }
+.bar.empty { background: var(--bg-secondary, #e0f2fe); }
+
+.bar-value {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+/* 累计统计 */
+.total-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 14px;
+  background: var(--bg-card, #fff);
+  border-radius: 16px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.stat-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.stat-box .stat-num {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-primary, #0c4a6e);
+}
+
+.stat-box .stat-label {
+  font-size: 11px;
+  color: var(--text-muted, #7dd3fc);
+}
+
+.stat-box.correct .stat-num { color: #10b981; }
+.stat-box.wrong .stat-num { color: #ef4444; }
 
 .bar-label {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-muted, #94a3b8);
 }
 
 .wrong-summary {
-  padding: 16px;
+  padding: 14px;
   background: var(--bg-card, #fff);
   border-radius: 16px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
@@ -294,5 +377,68 @@ async function refreshData() {
   color: var(--text-muted, #94a3b8);
   font-size: 14px;
   margin: 0;
+}
+
+/* 手机端适配 */
+@media (max-width: 420px) {
+  .progress-dashboard {
+    gap: 12px;
+  }
+
+  .section-title {
+    font-size: 16px;
+  }
+
+  .today-card {
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .today-status {
+    font-size: 13px;
+  }
+
+  .ring-svg {
+    width: 80px;
+    height: 80px;
+  }
+
+  .total-stats {
+    gap: 4px;
+    padding: 12px;
+  }
+
+  .stat-box .stat-num {
+    font-size: 18px;
+  }
+
+  .stat-box .stat-label {
+    font-size: 10px;
+  }
+
+  .week-stats {
+    padding: 12px;
+  }
+
+  .bar-chart {
+    height: 80px;
+    gap: 2px;
+  }
+
+  .bar {
+    min-width: 10px;
+  }
+
+  .bar-value {
+    font-size: 9px;
+  }
+
+  .bar-label {
+    font-size: 9px;
+  }
+
+  .sub-title {
+    font-size: 14px;
+  }
 }
 </style>

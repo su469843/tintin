@@ -39,7 +39,7 @@ export async function onRequestGet(context) {
         [id]
       )
       const bankInfo = await sql.query(
-        'SELECT b.*, u.name as creator_name FROM user_word_banks b LEFT JOIN users u ON u.id = b.user_id WHERE b.id = $1',
+        'SELECT b.*, p.name as creator_name FROM user_word_banks b LEFT JOIN profiles p ON p.id = b.user_id WHERE b.id = $1',
         [id]
       )
       return json({ data: words, bank: bankInfo[0] || null })
@@ -48,25 +48,25 @@ export async function onRequestGet(context) {
     // 获取公开词库
     if (isPublic === 'true') {
       const banks = await sql.query(
-        `SELECT b.*, u.name as creator_name, COUNT(w.id) as word_count
+        `SELECT b.*, p.name as creator_name, COUNT(w.id) as word_count
          FROM user_word_banks b
          LEFT JOIN user_words w ON w.bank_id = b.id
-         LEFT JOIN users u ON u.id = b.user_id
+         LEFT JOIN profiles p ON p.id = b.user_id
          WHERE b.is_public = true
-         GROUP BY b.id, u.name
+         GROUP BY b.id, p.name
          ORDER BY b.updated_at DESC`
       )
       return json({ data: banks })
     }
 
-    // 获取用户私有词库
+    // 获取用户所有词库（包括公开和私有）
     if (!userId) return json({ error: '缺少 userId' }, 400)
 
     const banks = await sql.query(
       `SELECT b.*, COUNT(w.id) as word_count
        FROM user_word_banks b
        LEFT JOIN user_words w ON w.bank_id = b.id
-       WHERE b.user_id = $1 AND (b.is_public IS NULL OR b.is_public = false)
+       WHERE b.user_id = $1
        GROUP BY b.id
        ORDER BY b.updated_at DESC`,
       [userId]
@@ -92,11 +92,11 @@ export async function onRequestPost(context) {
     const isPublic = body.isPublic === true
 
     const bankResult = await sql.query(
-      `INSERT INTO user_word_banks (user_id, name, lang, is_public)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO user_word_banks (user_id, name, lang, is_public, allow_import)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (user_id, name) DO UPDATE SET updated_at = NOW()
        RETURNING id`,
-      [body.userId, body.name, body.lang, isPublic]
+      [body.userId, body.name, body.lang, isPublic, body.allowImport !== false]
     )
 
     const bankId = bankResult[0]?.id

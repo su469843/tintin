@@ -21,8 +21,8 @@ export default defineConfig(({ mode }) => {
         name: '英语听写应用',
         short_name: '听写',
         description: '英语听写练习应用 - 支持多词库、错词本、语音朗读',
-        theme_color: '#3b82f6',
-        background_color: '#f0f4f8',
+        theme_color: '#0ea5e9',
+        background_color: '#f0f9ff',
         display: 'standalone',
         orientation: 'portrait',
         icons: [

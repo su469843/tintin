@@ -194,9 +194,9 @@ const emit = defineEmits(['switch-to-dictation'])
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
   color: #fff;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
 }
 
 .btn-danger {
@@ -284,5 +284,68 @@ const emit = defineEmits(['switch-to-dictation'])
 .delete-btn:hover {
   background: #fee2e2;
   color: #ef4444;
+}
+
+/* 手机端适配 */
+@media (max-width: 420px) {
+  .wrong-overview {
+    padding: 12px;
+    gap: 6px;
+  }
+
+  .overview-title {
+    font-size: 16px;
+  }
+
+  .bank-tags {
+    gap: 4px;
+  }
+
+  .bank-tag {
+    padding: 3px 10px;
+    font-size: 12px;
+  }
+
+  .btn {
+    height: 42px;
+    min-width: 80px;
+    padding: 0 14px;
+    font-size: 14px;
+    border-radius: 10px;
+  }
+
+  .wrong-list {
+    max-height: 300px;
+    gap: 6px;
+  }
+
+  .wrong-item {
+    padding: 10px 12px;
+    border-radius: 10px;
+  }
+
+  .wrong-word {
+    font-size: 15px;
+  }
+
+  .wrong-zh {
+    font-size: 13px;
+  }
+
+  .wrong-meta {
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .empty-state {
+    padding: 30px 16px;
+    font-size: 14px;
+  }
+
+  .delete-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 14px;
+  }
 }
 </style>

@@ -47,11 +47,20 @@ export async function onRequestGet(context) {
     // 按 code 验证
     if (code) {
       const rows = await sql.query(
-        'SELECT * FROM invitations WHERE code = $1 AND is_active = true AND used_by IS NULL',
+        'SELECT * FROM invitations WHERE code = $1 AND is_active = true',
         [code.toUpperCase()]
       )
       if (rows.length === 0) {
-        return json({ valid: false, message: '邀请码无效或已使用' })
+        return json({ valid: false, message: '邀请码无效或已禁用' })
+      }
+      // 检查已使用次数
+      const uses = await sql.query(
+        'SELECT COUNT(*) as count FROM invitation_uses WHERE code = $1',
+        [code.toUpperCase()]
+      )
+      const useCount = uses[0]?.count || 0
+      if (useCount >= MAX_INVITES) {
+        return json({ valid: false, message: '该邀请码已达到使用上限' })
       }
       return json({ valid: true, created_by: rows[0].created_by })
     }
@@ -64,25 +73,24 @@ export async function onRequestGet(context) {
         [userId]
       )
 
-      // 统计已邀请人数
-      const usedCount = await sql.query(
-        'SELECT COUNT(*) as count FROM invitations WHERE created_by = $1 AND used_by IS NOT NULL',
+      // 统计已邀请人数（从 invitation_uses 表）
+      const uses = await sql.query(
+        'SELECT COUNT(*) as count FROM invitation_uses WHERE code IN (SELECT code FROM invitations WHERE created_by = $1)',
         [userId]
       )
-
-      const remaining = MAX_INVITES - (usedCount[0]?.count || 0)
+      const usedCount = uses[0]?.count || 0
+      const remaining = MAX_INVITES - usedCount
 
       if (codes.length === 0) {
-        return json({ hasCode: false, usedCount: usedCount[0]?.count || 0, remaining })
+        return json({ hasCode: false, usedCount, remaining })
       }
 
       return json({
         hasCode: true,
         code: codes[0].code,
         isActive: codes[0].is_active,
-        usedCount: usedCount[0]?.count || 0,
+        usedCount,
         remaining: Math.max(0, remaining),
-        usedBy: codes[0].used_by || null,
       })
     }
 
@@ -148,28 +156,42 @@ export async function onRequestPut(context) {
 
     // 查询邀请码
     const rows = await sql.query(
-      'SELECT * FROM invitations WHERE code = $1 AND is_active = true AND used_by IS NULL',
+      'SELECT * FROM invitations WHERE code = $1 AND is_active = true',
       [body.code.toUpperCase()]
     )
 
     if (rows.length === 0) {
-      return json({ error: '邀请码无效或已使用' }, 400)
+      return json({ error: '邀请码无效或已禁用' }, 400)
     }
 
     // 检查该创建者是否已达到邀请上限
-    const usedCount = await sql.query(
-      'SELECT COUNT(*) as count FROM invitations WHERE created_by = $1 AND used_by IS NOT NULL',
-      [rows[0].created_by]
+    const uses = await sql.query(
+      'SELECT COUNT(*) as count FROM invitation_uses WHERE code = $1',
+      [body.code.toUpperCase()]
     )
 
-    if ((usedCount[0]?.count || 0) >= MAX_INVITES) {
+    if ((uses[0]?.count || 0) >= MAX_INVITES) {
       return json({ error: '该邀请码已达到使用上限' }, 400)
     }
 
-    // 标记为已使用
+    // 检查是否自己用自己的邀请码
+    if (rows[0].created_by === body.userId) {
+      return json({ error: '不能用自己的邀请码注册' }, 400)
+    }
+
+    // 检查是否已经用过该邀请码
+    const alreadyUsed = await sql.query(
+      'SELECT * FROM invitation_uses WHERE code = $1 AND used_by = $2',
+      [body.code.toUpperCase(), body.userId]
+    )
+    if (alreadyUsed.length > 0) {
+      return json({ error: '你已经用过该邀请码' }, 400)
+    }
+
+    // 记录使用（不将邀请码标记为已失效）
     await sql.query(
-      'UPDATE invitations SET used_by = $1, used_by_email = $2, used_at = NOW(), is_active = false WHERE code = $3',
-      [body.userId, body.email || null, body.code.toUpperCase()]
+      'INSERT INTO invitation_uses (code, used_by, used_by_email) VALUES ($1, $2, $3)',
+      [body.code.toUpperCase(), body.userId, body.email || null]
     )
 
     return json({ success: true })

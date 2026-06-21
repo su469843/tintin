@@ -56,6 +56,7 @@ const showCreateBank = ref(false)
 const newBankName = ref('')
 const newBankLang = ref('en')
 const newBankPublic = ref(false)
+const newBankAllowImport = ref(true)
 
 async function loadUserBanks() {
   const userId = authStore.userId
@@ -74,15 +75,20 @@ async function createBank() {
   const userId = authStore.userId
   if (!userId) return
 
+  const bankName = newBankName.value.trim()
+  const bankLang = newBankLang.value
+  const bankPublic = newBankPublic.value
+
   try {
     const resp = await fetch('/api/word-banks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         userId,
-        name: newBankName.value.trim(),
-        lang: newBankLang.value,
-        isPublic: newBankPublic.value,
+        name: bankName,
+        lang: bankLang,
+        isPublic: bankPublic,
+        allowImport: newBankAllowImport.value,
         words: [],
       }),
     })
@@ -91,8 +97,12 @@ async function createBank() {
       newBankName.value = ''
       showCreateBank.value = false
       await loadUserBanks()
-      store.importBank(newBankName.value.trim(), [])
-      store.switchBank(newBankName.value.trim())
+      store.importBank(bankName, [])
+      store.switchBank(bankName)
+      // 自动进入添加单词模式
+      activeAddBankId.value = json.bankId
+      activeAddBankName.value = bankName
+      showAddWord.value = true
     }
   } catch (err) {
     console.warn('[WordBank] 创建词库失败:', err.message)
@@ -110,6 +120,68 @@ async function loadUserBankWords(bankId, bankName) {
     }
   } catch (err) {
     console.warn('[WordBank] 加载词库失败:', err.message)
+  }
+}
+
+// ============================================================
+// 添加单词到已有词库
+// ============================================================
+const showAddWord = ref(false)
+const activeAddBankId = ref(null)
+const activeAddBankName = ref('')
+const addWordText = ref('')
+const addWordTranslation = ref('')
+
+function openAddWord(bank) {
+  activeAddBankId.value = bank.id
+  activeAddBankName.value = bank.name
+  showAddWord.value = true
+  addWordText.value = ''
+  addWordTranslation.value = ''
+}
+
+async function addWordToBank() {
+  if (!addWordText.value.trim() || !activeAddBankId.value) return
+  try {
+    const resp = await fetch(`/api/word-banks/${activeAddBankId.value}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        word: addWordText.value.trim(),
+        translation: addWordTranslation.value.trim() || null,
+      }),
+    })
+    const json = await resp.json()
+    if (json.success) {
+      addWordText.value = ''
+      addWordTranslation.value = ''
+      await loadUserBanks()
+      // 重新加载词库到 store
+      await loadUserBankWords(activeAddBankId.value, activeAddBankName.value)
+    }
+  } catch (err) {
+    console.warn('[WordBank] 添加单词失败:', err.message)
+  }
+}
+
+async function addBatchToBank() {
+  if (!importText.value.trim() || !activeAddBankId.value) return
+  const words = parseImportText(importText.value)
+  if (words.length === 0) return
+  try {
+    for (const w of words) {
+      await fetch(`/api/word-banks/${activeAddBankId.value}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word: w.word, translation: w.translation || null }),
+      })
+    }
+    importText.value = ''
+    showImport.value = false
+    await loadUserBanks()
+    await loadUserBankWords(activeAddBankId.value, activeAddBankName.value)
+  } catch (err) {
+    console.warn('[WordBank] 批量添加失败:', err.message)
   }
 }
 
@@ -229,7 +301,9 @@ onMounted(() => {
         :class="{ active: store.currentBank === bank.name }" @click="loadUserBankWords(bank.id, bank.name)">
         {{ bank.name }}
         <span v-if="bank.is_public" class="public-badge">公开</span>
+        <span v-if="bank.allow_import === false" class="private-badge">禁止导入</span>
         <span class="bank-count">({{ bank.word_count }})</span>
+        <span class="add-word-icon" @click.stop="openAddWord(bank)" title="添加单词">➕</span>
       </button>
     </div>
     <p v-else class="empty-hint">还没有创建词库</p>
@@ -252,7 +326,25 @@ onMounted(() => {
         <input v-model="newBankPublic" type="checkbox" />
         公开
       </label>
+      <label v-if="newBankPublic" class="public-toggle">
+        <input v-model="newBankAllowImport" type="checkbox" />
+        允许他人导入
+      </label>
       <button class="btn-confirm" :disabled="!newBankName.trim()" @click="createBank">✅ 创建</button>
+    </div>
+
+    <!-- 添加单词到词库 -->
+    <div v-if="showAddWord" class="add-word-panel">
+      <p class="add-word-title">✍️ 添加单词到「{{ activeAddBankName }}」</p>
+      <div class="add-word-row">
+        <input v-model="addWordText" type="text" class="form-input" :placeholder="activeAddBankName.includes('语文') || activeAddBankName.includes('chinese') ? '词语' : '单词'" @keyup.enter="addWordToBank" />
+        <input v-model="addWordTranslation" type="text" class="form-input" :placeholder="activeAddBankName.includes('语文') || activeAddBankName.includes('chinese') ? '拼音' : '释义'" @keyup.enter="addWordToBank" />
+        <button class="btn-confirm" :disabled="!addWordText.trim()" @click="addWordToBank">➕ 添加</button>
+      </div>
+      <div class="add-word-actions">
+        <button class="action-btn small" @click="showImport = !showImport">📥 批量添加</button>
+        <button class="action-btn small" @click="showAddWord = false">❎ 关闭</button>
+      </div>
     </div>
 
     <!-- 批量导入面板 -->
@@ -262,6 +354,7 @@ onMounted(() => {
       <div class="import-actions">
         <button class="btn-confirm" :disabled="!importText.trim()" @click="importToBuiltin">📥 导入到本地</button>
         <button v-if="authStore.isLoggedIn" class="btn-confirm btn-save" :disabled="!importText.trim()" @click="importToPrivate">💾 保存到我的词库</button>
+        <button v-if="showAddWord" class="btn-confirm btn-save" :disabled="!importText.trim()" @click="addBatchToBank">💾 添加到当前词库</button>
       </div>
     </div>
 
@@ -284,12 +377,13 @@ onMounted(() => {
 .sub-title { margin: 4px 0 0; font-size: 14px; font-weight: 600; color: var(--text-secondary); }
 .bank-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .bank-chip { padding: 6px 14px; border: 2px solid var(--border-color); border-radius: 20px; background: var(--bg-card); color: var(--text-secondary); font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 4px; }
-.bank-chip.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.bank-chip.active { background: linear-gradient(135deg, #0ea5e9, #0284c7); color: #fff; border-color: #0ea5e9; }
 .public-chip { border-color: #10b981; }
 .creator-name { font-weight: 400; font-size: 11px; color: var(--text-muted); max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bank-chip.active .creator-name { color: rgba(255,255,255,0.7); }
 .bank-count { font-weight: 400; font-size: 12px; }
 .public-badge { font-size: 10px; background: #10b981; color: #fff; padding: 1px 6px; border-radius: 8px; }
+.private-badge { font-size: 10px; background: #f59e0b; color: #fff; padding: 1px 6px; border-radius: 8px; }
 .empty-hint { font-size: 13px; color: var(--text-muted); margin: 0; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .action-btn { padding: 8px 16px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-card); color: var(--text-secondary); font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
@@ -297,21 +391,157 @@ onMounted(() => {
 .upload-label { display: inline-flex; align-items: center; cursor: pointer; }
 .create-bank-panel { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .form-input { flex: 1; min-width: 120px; height: 44px; padding: 0 14px; border: 2px solid var(--border-color); border-radius: 10px; background: var(--bg-input); color: var(--text-primary); font-size: 15px; outline: none; }
-.form-input:focus { border-color: #3b82f6; }
+.form-input:focus { border-color: #0ea5e9; }
 .form-select { height: 44px; padding: 0 12px; border: 2px solid var(--border-color); border-radius: 10px; background: var(--bg-input); color: var(--text-primary); font-size: 15px; outline: none; cursor: pointer; }
 .public-toggle { display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--text-secondary); cursor: pointer; }
 .import-panel { display: flex; flex-direction: column; gap: 10px; }
 .import-hint { margin: 0; font-size: 13px; color: var(--text-muted); }
 .import-hint code { background: var(--bg-secondary); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
 .import-textarea { width: 100%; border: 2px solid var(--border-color); border-radius: 12px; padding: 12px; font-size: 15px; font-family: inherit; resize: vertical; outline: none; background: var(--bg-input); color: var(--text-primary); box-sizing: border-box; }
-.import-textarea:focus { border-color: #3b82f6; }
+.import-textarea:focus { border-color: #0ea5e9; }
 .import-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .btn-confirm { height: 44px; padding: 0 24px; border: none; border-radius: 10px; background: linear-gradient(135deg, #10b981, #059669); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
 .btn-confirm:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-save { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+.btn-save { background: linear-gradient(135deg, #0ea5e9, #0284c7); }
 .word-preview { display: flex; flex-direction: column; gap: 8px; }
 .preview-count { margin: 0; font-size: 13px; color: var(--text-muted); }
 .preview-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 200px; overflow-y: auto; }
 .preview-chip { padding: 4px 10px; border-radius: 12px; font-size: 13px; font-weight: 500; background: var(--bg-secondary); color: var(--text-secondary); }
-.preview-chip.current { background: #3b82f6; color: #fff; }
+.preview-chip.current { background: linear-gradient(135deg, #0ea5e9, #0284c7); color: #fff; }
+
+/* 添加单词图标 */
+.add-word-icon {
+  margin-left: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+.add-word-icon:hover { opacity: 1; }
+
+/* 添加单词面板 */
+.add-word-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--bg-card);
+  border-radius: 12px;
+  border: 2px solid var(--border-color);
+}
+.add-word-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.add-word-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.add-word-row .form-input { flex: 1; min-width: 80px; height: 40px; font-size: 14px; }
+.add-word-actions {
+  display: flex;
+  gap: 8px;
+}
+.action-btn.small {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+/* 手机端适配 */
+@media (max-width: 420px) {
+  .word-bank-manager {
+    gap: 10px;
+  }
+
+  .section-title {
+    font-size: 16px;
+  }
+
+  .sub-title {
+    font-size: 13px;
+  }
+
+  .bank-list {
+    gap: 4px;
+  }
+
+  .bank-chip {
+    padding: 5px 10px;
+    font-size: 13px;
+    border-radius: 16px;
+    gap: 3px;
+  }
+
+  .creator-name {
+    max-width: 60px;
+    font-size: 10px;
+  }
+
+  .actions {
+    gap: 6px;
+  }
+
+  .action-btn {
+    padding: 6px 12px;
+    font-size: 13px;
+    border-radius: 8px;
+  }
+
+  .create-bank-panel {
+    gap: 6px;
+  }
+
+  .form-input {
+    min-width: 100px;
+    height: 40px;
+    padding: 0 10px;
+    font-size: 14px;
+  }
+
+  .form-select {
+    height: 40px;
+    padding: 0 8px;
+    font-size: 14px;
+  }
+
+  .btn-confirm {
+    height: 40px;
+    padding: 0 16px;
+    font-size: 14px;
+  }
+
+  .import-textarea {
+    padding: 10px;
+    font-size: 14px;
+  }
+
+  .add-word-panel {
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .add-word-row {
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .add-word-row .form-input {
+    min-width: 70px;
+    height: 38px;
+    font-size: 13px;
+  }
+
+  .preview-chips {
+    max-height: 150px;
+    gap: 4px;
+  }
+
+  .preview-chip {
+    padding: 3px 8px;
+    font-size: 12px;
+  }
+}
 </style>

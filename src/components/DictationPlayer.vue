@@ -249,9 +249,9 @@ async function playCurrentAndSchedule() {
   }, store.paperInterval * 1000)
 }
 
-// 纯听力模式：切换到此词时自动朗读
+// 纯听力模式 + 屏幕显示模式：切换到此词时自动朗读
 watch(() => store.currentIndex, () => {
-  if (store.dictationMode === 'listening' && !store.isFinished) {
+  if ((store.dictationMode === 'listening' || store.dictationMode === 'display') && !store.isFinished) {
     nextTick(() => {
       setTimeout(() => speakCurrent(), 300)
     })
@@ -502,14 +502,21 @@ function restartDictation() {
     <template v-else>
       <!-- 单词展示区 -->
       <div class="word-display">
-        <!-- ---- 屏幕显示模式 ---- -->
+        <!-- ---- 屏幕显示模式：提示按钮机制 ---- -->
         <template v-if="store.dictationMode === 'display'">
-          <div v-if="store.isChineseBank" class="word-block">
-            <p class="word-pinyin">{{ store.currentWordZh }}</p>
-          </div>
-          <div v-else class="word-block">
-            <p class="word-en">{{ store.currentWord }}</p>
-            <p v-if="store.currentWordZh" class="word-zh">{{ store.currentWordZh }}</p>
+          <div class="word-block">
+            <!-- 未点提示：显示「点击提示」 -->
+            <template v-if="!store.hintRevealed">
+              <button class="hint-btn" @click="store.hintRevealed = true">
+                💡 提示
+              </button>
+              <p class="hint-sub">点击显示释义</p>
+            </template>
+            <!-- 已点提示：显示中文释义/拼音 -->
+            <template v-else>
+              <p v-if="store.currentWordZh" class="word-zh hint-reveal">{{ store.currentWordZh }}</p>
+              <p v-else class="word-zh hint-reveal">—</p>
+            </template>
           </div>
         </template>
 
@@ -662,9 +669,9 @@ function restartDictation() {
 }
 
 .mode-selector button.active {
-  background: #3b82f6;
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
   color: #fff;
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 2px 12px rgba(14, 165, 233, 0.4);
 }
 
 /* 单词展示 */
@@ -702,8 +709,50 @@ function restartDictation() {
 .word-zh {
   font-size: 22px;
   font-weight: 600;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #7dd3fc);
   margin: 0;
+}
+
+/* 提示按钮 */
+.hint-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 32px;
+  border: 2px solid var(--border-color, #bae6fd);
+  border-radius: 16px;
+  background: var(--bg-card, #fff);
+  color: var(--text-secondary, #0369a1);
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 12px rgba(14, 165, 233, 0.1);
+}
+
+.hint-btn:hover {
+  border-color: #0ea5e9;
+  background: #e0f2fe;
+  box-shadow: 0 4px 16px rgba(14, 165, 233, 0.2);
+}
+
+.hint-btn:active {
+  transform: scale(0.97);
+}
+
+.hint-sub {
+  font-size: 13px;
+  color: var(--text-muted, #7dd3fc);
+  margin: 8px 0 0;
+}
+
+.hint-reveal {
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* 纯听力模式图标 */
@@ -761,7 +810,7 @@ function restartDictation() {
 }
 
 .word-input:focus {
-  border-color: #3b82f6;
+  border-color: #0ea5e9;
 }
 
 .word-input:disabled {
@@ -800,9 +849,9 @@ function restartDictation() {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
   color: #fff;
-  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.35);
+  box-shadow: 0 4px 16px rgba(14, 165, 233, 0.35);
 }
 
 .btn-success {
@@ -984,14 +1033,14 @@ function restartDictation() {
   white-space: nowrap;
 }
 .bank-chip:hover {
-  border-color: #93c5fd;
-  background: #eff6ff;
+  border-color: #7dd3fc;
+  background: #e0f2fe;
 }
 .bank-chip.active {
-  background: #3b82f6;
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
   color: #fff;
-  border-color: #3b82f6;
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+  border-color: #0ea5e9;
+  box-shadow: 0 2px 12px rgba(14, 165, 233, 0.4);
 }
 .setup-group { display: flex; flex-direction: column; gap: 8px; }
 .setup-label { font-size: 15px; font-weight: 600; color: var(--text-secondary); }
@@ -1003,7 +1052,7 @@ function restartDictation() {
   color: var(--text-secondary); font-size: 15px; font-weight: 600;
   cursor: pointer; transition: all 0.2s;
 }
-.repeat-options button.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.repeat-options button.active { background: linear-gradient(135deg, #0ea5e9, #0284c7); color: #fff; border-color: #0ea5e9; }
 .btn-start { width: 100%; height: 56px; font-size: 18px; margin-top: 8px; }
 
 .paper-playing {
@@ -1051,7 +1100,7 @@ function restartDictation() {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
+  box-shadow: 0 4px 20px rgba(14, 165, 233, 0.4);
 }
 
 /* 纸笔模式：标记阶段 */
@@ -1091,5 +1140,169 @@ function restartDictation() {
 @keyframes confetti-fall {
   0% { transform: translateY(-10px) rotate(0deg); opacity: 1; }
   100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+}
+
+/* 手机端适配 */
+@media (max-width: 420px) {
+  .dictation-player {
+    gap: 14px;
+  }
+
+  .mode-selector {
+    gap: 3px;
+    padding: 3px;
+    border-radius: 10px;
+    margin-bottom: 10px;
+  }
+
+  .mode-selector button {
+    padding: 5px 10px;
+    font-size: 12px;
+    border-radius: 8px;
+  }
+
+  .word-en {
+    font-size: 36px;
+  }
+
+  .word-pinyin {
+    font-size: 34px;
+  }
+
+  .word-zh {
+    font-size: 18px;
+  }
+
+  .hint-btn {
+    padding: 10px 24px;
+    font-size: 16px;
+    border-radius: 14px;
+  }
+
+  .hint-sub {
+    font-size: 12px;
+  }
+
+  .big-icon {
+    font-size: 48px;
+  }
+
+  .listening-hint {
+    font-size: 14px;
+  }
+
+  .word-input {
+    height: 48px;
+    font-size: 20px;
+    border-radius: 10px;
+  }
+
+  .input-buttons {
+    gap: 10px;
+  }
+
+  .btn {
+    height: 48px;
+    min-width: 96px;
+    padding: 0 16px;
+    font-size: 15px;
+    border-radius: 12px;
+  }
+
+  .feedback {
+    padding: 10px 16px;
+    font-size: 16px;
+    border-radius: 10px;
+  }
+
+  .feedback strong {
+    font-size: 18px;
+  }
+
+  .result-title {
+    font-size: 24px;
+  }
+
+  .result-stats {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .stat-item {
+    padding: 10px 14px;
+    min-width: 60px;
+    border-radius: 10px;
+  }
+
+  .stat-num {
+    font-size: 22px;
+  }
+
+  .stat-label {
+    font-size: 11px;
+  }
+
+  .paper-hint-text {
+    font-size: 36px;
+  }
+
+  .paper-controls {
+    gap: 10px;
+  }
+
+  .btn-play {
+    width: 60px;
+    height: 60px;
+    font-size: 24px;
+  }
+
+  .btn-secondary {
+    height: 44px;
+    min-width: 80px;
+    font-size: 14px;
+    padding: 0 12px;
+  }
+
+  .setup-title {
+    font-size: 18px;
+  }
+
+  .bank-chip {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .marking-item {
+    padding: 10px 12px;
+  }
+
+  .marking-en {
+    font-size: 16px;
+  }
+
+  .marking-zh {
+    font-size: 13px;
+  }
+
+  .marking-status {
+    font-size: 20px;
+  }
+
+  .btn-start {
+    height: 50px;
+    font-size: 16px;
+  }
+
+  .wrong-list {
+    max-height: 160px;
+  }
+
+  .wrong-item {
+    padding: 6px 10px;
+  }
+
+  .wrong-word {
+    font-size: 14px;
+  }
 }
 </style>
