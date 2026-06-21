@@ -87,11 +87,19 @@ export const useAuthStore = defineStore('auth', () => {
 
           // 如果有邀请码，标记为已使用
           if (inviteCode) {
-            await fetch('/api/invitations', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ code: inviteCode, userId: newUserId, email }),
-            }).catch(() => {})
+            try {
+              const inviteResp = await fetch('/api/invitations', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: inviteCode, userId: newUserId, email }),
+              })
+              if (!inviteResp.ok) {
+                const errData = await inviteResp.json().catch(() => ({}))
+                console.warn('[Auth] 邀请码使用失败:', errData.error || inviteResp.status)
+              }
+            } catch (err) {
+              console.warn('[Auth] 邀请码使用请求失败:', err.message)
+            }
           }
 
           // 生成邀请码

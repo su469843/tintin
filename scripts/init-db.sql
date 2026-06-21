@@ -51,6 +51,17 @@ CREATE TABLE IF NOT EXISTS invitations (
 CREATE INDEX IF NOT EXISTS idx_invitations_code ON invitations(code);
 CREATE INDEX IF NOT EXISTS idx_invitations_created_by ON invitations(created_by);
 
+-- 4b. 邀请码使用记录表（支持同一邀请码多次使用）
+CREATE TABLE IF NOT EXISTS invitation_uses (
+  id SERIAL PRIMARY KEY,
+  code TEXT NOT NULL,
+  used_by TEXT NOT NULL,
+  used_by_email TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_invitation_uses_code ON invitation_uses(code);
+CREATE INDEX IF NOT EXISTS idx_invitation_uses_used_by ON invitation_uses(used_by);
+
 -- 5. 用户词库表
 CREATE TABLE IF NOT EXISTS user_word_banks (
   id SERIAL PRIMARY KEY,

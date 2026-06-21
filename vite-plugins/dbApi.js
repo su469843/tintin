@@ -65,6 +65,38 @@ async function ensureTables(sql) {
   for (const stmt of migrations) {
     try { await sql.query(stmt) } catch (err) { console.warn('[DB Plugin] 迁移警告:', err.message) }
   }
+
+  // 邀请码迁移：重置所有旧邀请码为活跃状态（新系统用 invitation_uses 追踪使用次数）
+  try {
+    const result = await sql.query(`UPDATE invitations SET is_active = true WHERE is_active = false`)
+    if (result.count && result.count > 0) {
+      console.log(`[DB Plugin] 已重置 ${result.count} 个旧邀请码为活跃状态`)
+    }
+    // 迁移旧 used_by 数据到 invitation_uses 表
+    const oldUses = await sql.query(
+      `SELECT code, used_by, used_by_email FROM invitations WHERE used_by IS NOT NULL AND used_by != ''`
+    )
+    if (oldUses.length > 0) {
+      for (const row of oldUses) {
+        const existing = await sql.query(
+          'SELECT id FROM invitation_uses WHERE code = $1 AND used_by = $2',
+          [row.code, row.used_by]
+        )
+        if (existing.length === 0) {
+          await sql.query(
+            'INSERT INTO invitation_uses (code, used_by, used_by_email) VALUES ($1, $2, $3)',
+            [row.code, row.used_by, row.used_by_email || null]
+          )
+        }
+      }
+      console.log(`[DB Plugin] 已迁移 ${oldUses.length} 条旧邀请记录到 invitation_uses 表`)
+      // 清空旧的 used_by 字段
+      await sql.query(`UPDATE invitations SET used_by = NULL, used_by_email = NULL, used_at = NULL WHERE used_by IS NOT NULL`)
+    }
+  } catch (err) {
+    console.warn('[DB Plugin] 邀请码迁移警告:', err.message)
+  }
+
   console.log('[DB Plugin] 数据库表初始化完成')
 }
 
